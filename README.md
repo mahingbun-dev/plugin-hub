@@ -6,6 +6,10 @@ English | [简体中文](README.zh-CN.md)
 
 ![plugin-hub architecture](docs/assets/hero.png)
 
+[![CI](https://github.com/mahingbun-dev/plugin-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/mahingbun-dev/plugin-hub/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/mahingbun-dev/plugin-hub)](https://github.com/mahingbun-dev/plugin-hub/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 plugin-hub is the control hub for an out-of-process plugin architecture. The core only provides the "socket" and contains **no business semantics**: every business capability is supplied by a **plugin** — a separate container exposing a gRPC interface, in any language (Go SDK by default). Register and it is usable immediately, with no hub restart.
 
 It targets this class of problem: many business systems need a single access point, contract changes need to be controlled, call chains need to be observable, and AI agents need to reach all of it through MCP — while business code keeps its own deployment, its own stack, and its own release cadence.

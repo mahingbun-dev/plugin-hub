@@ -6,6 +6,10 @@ English | [简体中文](README.zh-CN.md)
 
 ![plugin-hub 架构总览](docs/assets/hero.png)
 
+[![CI](https://github.com/mahingbun-dev/plugin-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/mahingbun-dev/plugin-hub/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/mahingbun-dev/plugin-hub)](https://github.com/mahingbun-dev/plugin-hub/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 plugin-hub 是一个进程外插件架构的控制中台。核心只做「插座」，**不含任何业务语义**：业务能力全部由**插件**提供——独立容器、gRPC 接口、任意语言（默认 Go SDK），注册即用，无需重启中台。
 
 它解决的是这类问题：多个业务系统需要统一的接入点、契约变更需要可控、调用链需要可观测、AI agent 需要通过 MCP 统一调度这些能力——而业务代码保持独立部署、独立技术栈、独立发布节奏。
