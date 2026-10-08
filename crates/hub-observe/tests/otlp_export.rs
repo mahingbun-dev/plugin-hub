@@ -92,7 +92,7 @@ async fn 导出的_span_能被_collector_收到且内容正确() {
     assert_eq!(spans[0]["status"]["code"], 1);
     assert_eq!(
         payloads[0]["resourceSpans"][0]["resource"]["attributes"][0]["value"]["stringValue"],
-        "anc-hub",
+        "plugin-hub",
         "资源属性要标明来源服务"
     );
 }

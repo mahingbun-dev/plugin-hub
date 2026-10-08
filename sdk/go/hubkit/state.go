@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1"
 )
 
 // StateTokenMetadata 是状态凭证的 metadata 键，必须与中台侧一致

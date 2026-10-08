@@ -1,4 +1,4 @@
-//! anc-hub 契约校验层。
+//! plugin-hub 契约校验层。
 //!
 //! 插件的契约以 `google.protobuf.FileDescriptorSet` 形式随注册提交，本 crate 负责：
 //!

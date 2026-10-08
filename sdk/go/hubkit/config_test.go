@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/hubkit"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/hubkit"
 )
 
 func Test状态调用上限有默认值(t *testing.T) {

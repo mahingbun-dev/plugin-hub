@@ -966,7 +966,7 @@ async fn mcp_端点响应_initialize(pool: PgPool) {
     let (session, value) = mcp_request(&h.app, None, body).await;
 
     assert_eq!(
-        value["result"]["serverInfo"]["name"], "anc-hub",
+        value["result"]["serverInfo"]["name"], "plugin-hub",
         "agent 要能认出是中台在应答，而不是 rmcp 的默认库名"
     );
     assert!(
@@ -1175,7 +1175,7 @@ async fn 配上对外域名后外部_host_可通过(pool: PgPool) {
         mcp_request_with_host(&h.app, None, "hub.example.com", init_body()).await;
     assert_eq!(status, StatusCode::OK, "配置里的域名应放行：{value}");
     assert_eq!(
-        value["result"]["serverInfo"]["name"], "anc-hub",
+        value["result"]["serverInfo"]["name"], "plugin-hub",
         "要真的走到协议层，而不是碰巧回了个 200"
     );
 

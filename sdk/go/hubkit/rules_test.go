@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/hubkit"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/hubkit"
 )
 
 // 契约文件与 Rust 侧读的是同一份（crates/hub-grpc/tests/state_rules.rs 用 include_str!）。

@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1"
 )
 
 // StructTypeURL 是「直接调用」载荷的类型标识。

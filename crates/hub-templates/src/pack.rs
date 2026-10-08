@@ -52,7 +52,7 @@ impl From<std::io::Error> for PackError {
 
 /// 下载包的文件名。
 pub fn download_filename(lang: &Language, plugin_name: &str) -> String {
-    format!("anc-hub-{}-plugin-{plugin_name}.zip", lang.id)
+    format!("plugin-hub-{}-plugin-{plugin_name}.zip", lang.id)
 }
 
 /// 渲染并打包一门语言的插件工程。
@@ -272,7 +272,7 @@ mod tests {
     fn 下载文件名带语言与插件名() {
         assert_eq!(
             download_filename(go(), "order-reader"),
-            "anc-hub-go-plugin-order-reader.zip"
+            "plugin-hub-go-plugin-order-reader.zip"
         );
     }
 

@@ -1,6 +1,6 @@
-# anc-hub 插件 SDK（Go）
+# plugin-hub 插件 SDK（Go）
 
-用 Go 写 anc-hub 插件的工具箱。**六件套**：
+用 Go 写 plugin-hub 插件的工具箱。**六件套**：
 
 | 件 | 位置 | 作用 |
 |---|---|---|

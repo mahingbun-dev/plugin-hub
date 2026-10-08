@@ -7,7 +7,7 @@ edition = "2021"
 rust-version = "1.85"
 license = "UNLICENSED"
 publish = false
-description = "anc-hub 插件侧 SDK（Rust）：服务端骨架、自注册、心跳、被摘除后自愈、优雅退出"
+description = "plugin-hub 插件侧 SDK（Rust）：服务端骨架、自注册、心跳、被摘除后自愈、优雅退出"
 
 # 独立 workspace：本 crate 必须能**单独构建**——它将来是随脚手架包一起发给开发者的，
 # 拿到的工程里它躺在 <工程>/sdk/ 下，中台仓库根本不在旁边。

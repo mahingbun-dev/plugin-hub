@@ -14,9 +14,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/hubkit"
-	"github.com/mahingbun-dev/anc-hub/sdk/go/mockhub"
-	"github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/hubkit"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/mockhub"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1"
 )
 
 // gwEchoPlugin 是被调方：把收到的 JSON 载荷原样回显，并记下收到的信封供断言。

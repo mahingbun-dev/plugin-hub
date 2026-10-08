@@ -1,4 +1,4 @@
-//! anc-hub 持久化层：PostgreSQL（sqlx）+ 内嵌迁移。
+//! plugin-hub 持久化层：PostgreSQL（sqlx）+ 内嵌迁移。
 //!
 //! **用运行时 SQL 而非编译期宏**（`sqlx::query_as` 而非 `sqlx::query_as!`）：
 //! 编译期宏要求构建时能连上数据库、或维护一份 `.sqlx` 离线缓存，会让「本地 PG 容器

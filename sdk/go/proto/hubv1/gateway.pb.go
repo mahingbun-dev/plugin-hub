@@ -767,7 +767,7 @@ const file_hub_v1_gateway_proto_rawDesc = "" +
 	"\vListPlugins\x12\x1a.hub.v1.ListPluginsRequest\x1a\x1b.hub.v1.ListPluginsResponse\x12R\n" +
 	"\x0fDescribeMessage\x12\x1e.hub.v1.DescribeMessageRequest\x1a\x1f.hub.v1.DescribeMessageResponse\x12F\n" +
 	"\vGetContract\x12\x1a.hub.v1.GetContractRequest\x1a\x1b.hub.v1.GetContractResponse\x127\n" +
-	"\x06Invoke\x12\x15.hub.v1.InvokeRequest\x1a\x16.hub.v1.InvokeResponseBIZGgithub.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
+	"\x06Invoke\x12\x15.hub.v1.InvokeRequest\x1a\x16.hub.v1.InvokeResponseBIZGgithub.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
 
 var (
 	file_hub_v1_gateway_proto_rawDescOnce sync.Once

@@ -27,10 +27,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/conformance"
-	"github.com/mahingbun-dev/anc-hub/sdk/go/hubkit"
-	"github.com/mahingbun-dev/anc-hub/sdk/go/mockhub"
-	"github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/conformance"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/hubkit"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/mockhub"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1"
 )
 
 const (
@@ -175,7 +175,7 @@ func parseArgs(args []string) (options, []string, error) {
 }
 
 func usage() {
-	fmt.Print(`hubprobe —— anc-hub 插件调试工具
+	fmt.Print(`hubprobe —— plugin-hub 插件调试工具
 
 用法:
   hubprobe <命令> <插件地址> [选项]

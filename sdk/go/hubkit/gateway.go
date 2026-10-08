@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1"
 )
 
 // CallChainMeta 是互调链的 meta 键：链上是「已处理过该消息的插件名」，逗号分隔。

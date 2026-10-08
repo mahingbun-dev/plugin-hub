@@ -35,9 +35,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/hubkit"
-	"github.com/mahingbun-dev/anc-hub/sdk/go/mockhub"
-	"github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/hubkit"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/mockhub"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1"
 )
 
 // checkTimeout 是各项运行时检查的时间上限。

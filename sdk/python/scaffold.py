@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成一个可运行的 anc-hub 插件工程（Python）。
+"""生成一个可运行的 plugin-hub 插件工程（Python）。
 
     python3 scaffold.py new <name> [--dir <path>] [--package <pkg>] [--hub-addr <addr>]
 
@@ -250,7 +250,7 @@ def _copy_sdk(root: Path, target: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="scaffold.py", description="anc-hub 插件脚手架（Python）"
+        prog="scaffold.py", description="plugin-hub 插件脚手架（Python）"
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

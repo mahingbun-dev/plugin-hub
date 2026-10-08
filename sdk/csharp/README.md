@@ -1,6 +1,6 @@
-# HubKit —— anc-hub 插件 SDK（C# / .NET）
+# HubKit —— plugin-hub 插件 SDK（C# / .NET）
 
-anc-hub（控制中台）的插件侧服务端骨架。插件作者只需要实现 `IPlugin`，其余全部由骨架处理：
+plugin-hub（控制中台）的插件侧服务端骨架。插件作者只需要实现 `IPlugin`，其余全部由骨架处理：
 起 gRPC 服务、向中台自注册、按中台指定的周期发心跳、被摘除后自动重新注册、优雅退出时注销。
 
 它是 `sdk/go` 的 C# 等价物：同一份 nginx / TLS / 注册 / 心跳约定，同一套日志形状，

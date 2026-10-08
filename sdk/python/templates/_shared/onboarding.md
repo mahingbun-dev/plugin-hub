@@ -50,7 +50,7 @@
 
 ```bash
 curl http://127.0.0.1:8092/health
-# 真中台 → {"status":"ok","name":"anc-hub",...}
+# 真中台 → {"status":"ok","name":"plugin-hub",...}
 # mock   → {"status":"ok","name":"hub-mock",...}
 ```
 
@@ -86,7 +86,7 @@ curl http://127.0.0.1:8092/rejections  # 看被拒的，含原因与出路
 ```bash
 curl http://127.0.0.1:8092/health
 #   "name":"hub-mock"  → 你在对 mock 验
-#   "name":"anc-hub"   → 你在对真中台验
+#   "name":"plugin-hub"   → 你在对真中台验
 ```
 
 `hub-mock` 与真中台**判据同源**（都调中台的注册校验函数），但它**不落库、不实现

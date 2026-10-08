@@ -24,7 +24,7 @@ namespace HubKit;
 /// await PluginHost.RunAsync(new MyPlugin(), HubConfig.FromEnv());
 /// </code>
 ///
-/// 插件被强制无状态：实例内存不保证跨调用保留（见 anc-gateway 的 docs/design.md），
+/// 插件被强制无状态：实例内存不保证跨调用保留（见 plugin-hub 的 docs/design.md），
 /// 需要跨调用保留的东西走中台的 HubState 接口——再实现 <see cref="IStateAware"/>，
 /// 宿主会在注册成功后把 <see cref="StateClient"/> 注入给你（凭证只有中台知道，
 /// 插件作者不该自己构造它）。

@@ -1,6 +1,6 @@
 # @@name@@
 
-一个 [anc-hub](.)（内网控制中台）的**插件**，用 Python 写。
+一个 [plugin-hub](.)（内网控制中台）的**插件**，用 Python 写。
 
 中台是「插座」，不含业务语义；业务能力由**进程外插件**提供——独立进程、gRPC、
 任意语言。本工程用 `hubkit`（Python 版插件 SDK）实现了中台要求的
@@ -19,7 +19,7 @@ python -m pytest -q
 # 3. 起一个本地中台（中台仓库根目录）
 cargo run -p hub-mock
 #    确认对面是谁：curl http://127.0.0.1:8092/health
-#    "name":"hub-mock" 是在对 mock 验，"name":"anc-hub" 才是真中台
+#    "name":"hub-mock" 是在对 mock 验，"name":"plugin-hub" 才是真中台
 
 # 4. 起插件。它会连 HUB_ADDR 指定的中台并自注册
 HUB_ADDR=@@hub_addr@@ \

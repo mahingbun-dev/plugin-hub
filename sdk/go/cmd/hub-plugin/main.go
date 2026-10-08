@@ -16,7 +16,7 @@ import (
 
 const (
 	// SDKModule 是本 SDK 的 module 路径。生成的工程默认引用它。
-	SDKModule = "github.com/mahingbun-dev/anc-hub/sdk/go"
+	SDKModule = "github.com/mahingbun-dev/plugin-hub/sdk/go"
 
 	exitOK    = 0
 	exitUsage = 2
@@ -47,7 +47,7 @@ func run(args []string) int {
 }
 
 func usage() {
-	fmt.Print(`hub-plugin —— anc-hub 插件脚手架
+	fmt.Print(`hub-plugin —— plugin-hub 插件脚手架
 
 用法:
   hub-plugin new <name> [选项]

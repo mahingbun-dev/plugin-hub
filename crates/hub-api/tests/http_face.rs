@@ -41,7 +41,7 @@ async fn 健康检查返回_ok_与版本信息() {
     let json: serde_json::Value = serde_json::from_slice(&body).expect("响应不是合法 JSON");
     // 部署门禁按这个字段判定，必须保持
     assert_eq!(json["status"], "ok");
-    assert_eq!(json["name"], "anc-hub");
+    assert_eq!(json["name"], "plugin-hub");
     assert!(json["version"].is_string());
     assert!(json["uptime_seconds"].is_u64());
 }

@@ -1,10 +1,10 @@
-# anc-hub 设计决策与实施计划
+# plugin-hub 设计决策与实施计划
 
 > 本文记录经完整需求访谈后确认的全部架构决策、契约设计与分期计划。决策表里的「代价」列是刻意保留的——它们是被知情接受的成本，不是待办事项。
 
 ## 一、为什么做这个
 
-原 `anc-gateway` 是一套 Node.js/TS 反向代理网关（Redis FIFO 锁排队 + node:vm 注入 + MCP 管理面）。经评估后**整体废弃**：不做迁移、不做纳管、不保留运行。
+原 `plugin-hub` 是一套 Node.js/TS 反向代理网关（Redis FIFO 锁排队 + node:vm 注入 + MCP 管理面）。经评估后**整体废弃**：不做迁移、不做纳管、不保留运行。
 
 取而代之的是一个 Rust **控制中台**，思路从「做一条代理链路」转为「做一个插座」：
 - 中台只提供契约规范、注册发现、声明式编排、插件间总线、MCP 工具面与治理
@@ -29,7 +29,7 @@
                     │ 127.0.0.1:8095                  │ 127.0.0.1:8093
                     ▼                                 ▼
    ┌──────────────────────────────────────────────────────────────┐
-   │                     anc-hub（Rust，host 网络）                 │
+   │                     plugin-hub（Rust，host 网络）                 │
    │  ┌────────────┬────────────┬────────────┬─────────────────┐  │
    │  │ 契约中心    │ 注册发现    │ 编排引擎    │ MCP 工具面      │  │
    │  │ descriptor │ 心跳/探测   │ 同步/异步链  │ 插件工具自动聚合 │  │
@@ -39,7 +39,7 @@
    │  │Redis Stream │HTTP/MQ/cron│span+OTel   │ 本地 socket CLI │  │
    │  └────────────┴────────────┴────────────┴─────────────────┘  │
    └───────┬─────────────────────────┬────────────────────────────┘
-           │ PG 127.0.0.1:55432/anc_hub │ Redis 127.0.0.1:56380/2
+           │ PG 127.0.0.1:55432/plugin_hub │ Redis 127.0.0.1:56380/2
            │ （部署自带的容器，见下）    │
            ▼                         ▼
     ┌──────────────────────────────────────────────┐
@@ -79,7 +79,7 @@
 | 容量目标 | 1000–2000 TPS 编排、5000 msg/s、500 并发 flow、单 flow ≤32 节点、编排开销 P99 < 20ms | 超过目标需多实例方案 |
 | Rust 栈 | axum + tonic + sqlx + PostgreSQL + redis-rs + tracing + metrics-exporter-prometheus | sqlx 编译期宏在离线环境需 `.sqlx` 缓存 |
 | 控制台 | **在 `anc-frontend` 仓库开发**（Vue3 + Element Plus + Vue Flow），产物由 nginx 静态 serve | 前端与中台分属两个仓库，需对齐 API 契约 |
-| 部署 | ver server + 复用同一台 nginx 与证书；PG 新建库 `anc_hub`；Redis 新 db `/2` | 中台与 anc 共享服务器资源与故障域 |
+| 部署 | ver server + 复用同一台 nginx 与证书；PG 新建库 `plugin_hub`；Redis 新 db `/2` | 中台与 anc 共享服务器资源与故障域 |
 | 离线构建 | rust 工具链镜像 + `cargo vendor` 快照（GitLab Generic Package）+ 服务器容器内 `cargo build --offline` | 首次全量编译 5–15 分钟 |
 | 交付节奏 | 四期：骨架 → 编排 → 异步 → 治理与可视化 | 完整形态看到得最晚 |
 
@@ -155,7 +155,7 @@ service HubState {                           // 插件 → 中台：外置状态
 
 descriptor 基线存 `plugin_contracts.descriptor_blob`，按 (消息全限定名, 版本) 留历史。
 
-## 五、数据模型（PostgreSQL 库 `anc_hub`）
+## 五、数据模型（PostgreSQL 库 `plugin_hub`）
 
 > 下表的列名以**实现为准**（迁移文件在 `crates/hub-store/migrations/`）。
 > 计划阶段写的列名有几处与最终实现不同，这里已订正——一份与代码对不上的数据模型
@@ -187,7 +187,7 @@ descriptor 基线存 `plugin_contracts.descriptor_blob`，按 (消息全限定�
 ## 六、仓库结构
 
 ```
-anc-hub/
+plugin-hub/
 ├── Cargo.toml                    # workspace
 ├── rust-toolchain.toml           # 本地开发用 stable；**不参与**离线构建（见第八节）
 ├── crates/
@@ -676,7 +676,7 @@ manifest 里声明的工具以 `插件名__工具名` 出现在 `tools/list` 里
   > （独立 stage，按需部署）。依赖不再需要额外的 module 快照——Go 的 vendor 提交进了仓库，
   > 容器里 `GOPROXY=off` 也编得过。工具链则由**自制的构建镜像**提供：服务器上那个
   > `anc-builder` 走的是 rustup 的 minimal profile，**没有 Go**。故 `deploy/builder.Dockerfile`
-  > 自制了一个 Rust / Go / Python 齐备的 `anc-hub-builder:1.0`，中台与插件共用。
+  > 自制了一个 Rust / Go / Python 齐备的 `plugin-hub-builder:1.0`，中台与插件共用。
   > 它顺带也带了 clippy 与 rustfmt，但 **CI 不跑**——门禁只有 `cargo test`，与
   > anc / anc-codebase 一致；那两个留给本地排查用。
 - **`hub-server` 的装配没有自动化验证**。注册面、状态面（含它为 HubState 单开的 Redis

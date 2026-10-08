@@ -7,9 +7,9 @@
 # 让测试命令零配置可跑。
 #
 # 一次性准备（本地 PG 容器，映射 55433）：
-#   docker run -d --name anc-hub-dev-pg -p 55433:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
-#   docker exec anc-hub-dev-pg psql -U postgres -c "CREATE ROLE hub LOGIN PASSWORD 'hub' CREATEDB;"
-#   docker exec anc-hub-dev-pg psql -U postgres -c "CREATE DATABASE hub_test OWNER hub;"
+#   docker run -d --name plugin-hub-dev-pg -p 55433:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+#   docker exec plugin-hub-dev-pg psql -U postgres -c "CREATE ROLE hub LOGIN PASSWORD 'hub' CREATEDB;"
+#   docker exec plugin-hub-dev-pg psql -U postgres -c "CREATE DATABASE hub_test OWNER hub;"
 # CREATEDB 是必须的：sqlx 每条用例建一个临时库、跑完迁移再销毁。
 #
 # 优先级：shell 里已 export 的 DATABASE_URL 覆盖这里的值（cargo [env] 只补缺），

@@ -1,6 +1,6 @@
 # 插件接入指南
 
-给**要写 anc-hub 插件的人**：从零到「接入成功」的完整路径。
+给**要写 plugin-hub 插件的人**：从零到「接入成功」的完整路径。
 
 ## 三份文档的分工
 
@@ -43,7 +43,7 @@
 
 ```bash
 # ── 准备：把 SDK 路径记下来，后面全程要用
-export HUB_SDK=/path/to/anc-gateway/sdk/go
+export HUB_SDK=/path/to/plugin-hub/sdk/go
 
 # ── 生成工程
 cd $HUB_SDK
@@ -107,7 +107,7 @@ go -C $HUB_SDK run ./cmd/hubprobe e2e http://127.0.0.1:8092 order-reader \
 
 ```bash
 curl http://127.0.0.1:8092/health          # 本地
-# → {"status":"ok","name":"anc-hub","version":"0.1.0","uptime_seconds":1515}
+# → {"status":"ok","name":"plugin-hub","version":"0.1.0","uptime_seconds":1515}
 
 curl https://hub.example.com:8081/hub-api/health   # UAT
 ```

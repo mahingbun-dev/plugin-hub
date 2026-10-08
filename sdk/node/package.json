@@ -2,7 +2,7 @@
   "name": "@example/hubkit",
   "version": "0.1.0",
   "private": false,
-  "description": "anc-hub 插件 SDK（Node/TypeScript）：服务端骨架、自注册、心跳、契约自检与 mock 中台",
+  "description": "plugin-hub 插件 SDK（Node/TypeScript）：服务端骨架、自注册、心跳、契约自检与 mock 中台",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {

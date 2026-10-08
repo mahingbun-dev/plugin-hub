@@ -1,6 +1,6 @@
-# anc-hub 插件 SDK（Node / TypeScript）
+# plugin-hub 插件 SDK（Node / TypeScript）
 
-用 Node 写 anc-hub 插件的工具箱。**五件套**：
+用 Node 写 plugin-hub 插件的工具箱。**五件套**：
 
 | 件 | 位置 | 作用 |
 |---|---|---|

@@ -1,7 +1,7 @@
-# anc-hub 的通用运行镜像（多阶段在线构建）。
+# plugin-hub 的通用运行镜像（多阶段在线构建）。
 #
 # 用法（在仓库根目录）：
-#   docker build -f deploy/Dockerfile -t anc-hub:latest .
+#   docker build -f deploy/Dockerfile -t plugin-hub:latest .
 #
 # 构建输入刻意与 .dockerignore 对齐：vendor/（如需离线构建先 `cargo vendor`
 # 生成）、crates/、sdk/（hub-templates 的 build.rs 会扫描 sdk/*/templates/
@@ -43,7 +43,7 @@ COPY --from=build /src/target/release/hubctl /usr/local/bin/hubctl
 
 # 运维通道的 socket 目录。容器用 host 网络时，这个路径只有宿主机 root 能进
 # ——信任边界就是它。构建期以 root 建好并把属主交给 app，运行期非 root 跑。
-RUN mkdir -p /run/anc-hub && chown app:app /run/anc-hub
+RUN mkdir -p /run/plugin-hub && chown app:app /run/plugin-hub
 
 # HTTP 面只绑回环（经 nginx 同源暴露给控制台/agent），插件面绑全网卡（远程插件要能注册）。
 # 这两个值刻意不同，见 docs/design.md。compose 会用 .env 里的同名变量覆盖它们。
@@ -51,7 +51,7 @@ ENV HUB_HTTP_HOST=127.0.0.1 \
     HUB_HTTP_PORT=8095 \
     HUB_GRPC_HOST=0.0.0.0 \
     HUB_GRPC_PORT=8093 \
-    HUB_OPS_SOCKET=/run/anc-hub/ops.sock
+    HUB_OPS_SOCKET=/run/plugin-hub/ops.sock
 
 EXPOSE 8095 8093
 

@@ -39,7 +39,7 @@
 ///
 /// 所以定一条：**动插件之前先确认对面是谁**——
 /// `curl http://127.0.0.1:8092/health`，看到 `"name":"hub-mock"` 就是在对 mock 验，
-/// 看到 `"name":"anc-hub"` 才是真中台。
+/// 看到 `"name":"plugin-hub"` 才是真中台。
 pub const MOCK_NAME: &str = "hub-mock";
 
 /// mock 下发的状态凭证的前缀。

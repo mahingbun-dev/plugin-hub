@@ -13,7 +13,7 @@ use tokio::sync::watch;
 
 /// 每个用例一个独立 socket 路径。
 fn socket_path(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join("anc-hub-ops-tests");
+    let dir = std::env::temp_dir().join("plugin-hub-ops-tests");
     std::fs::create_dir_all(&dir).expect("建临时目录失败");
     dir.join(format!("{tag}-{}.sock", std::process::id()))
 }

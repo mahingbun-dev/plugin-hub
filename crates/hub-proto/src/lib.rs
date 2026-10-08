@@ -1,4 +1,4 @@
-//! anc-hub 契约层：protobuf 定义与生成代码。
+//! plugin-hub 契约层：protobuf 定义与生成代码。
 //!
 //! 这里是**唯一的契约来源**——插件 manifest、MCP 工具入参 schema、编排时的
 //! 兼容性校验，全部由这些 proto 派生，不维护第二套 schema。

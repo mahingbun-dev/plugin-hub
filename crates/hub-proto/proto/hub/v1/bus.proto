@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package hub.v1;
 
-option go_package = "github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1";
+option go_package = "github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1";
 
 import "hub/v1/envelope.proto";
 

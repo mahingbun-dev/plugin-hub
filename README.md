@@ -1,8 +1,8 @@
-# anc-hub
+# plugin-hub
 
 > **Rust 插件中台** —— 契约中心 · 注册发现 · 声明式编排 · 事件总线 · MCP 工具面
 
-anc-hub 是一个进程外插件架构的控制中台。核心只做「插座」，**不含任何业务语义**：业务能力全部由**插件**提供——独立容器、gRPC 接口、任意语言（默认 Go SDK），注册即用，无需重启中台。
+plugin-hub 是一个进程外插件架构的控制中台。核心只做「插座」，**不含任何业务语义**：业务能力全部由**插件**提供——独立容器、gRPC 接口、任意语言（默认 Go SDK），注册即用，无需重启中台。
 
 它解决的是这类问题：多个业务系统需要统一的接入点、契约变更需要可控、调用链需要可观测、AI agent 需要通过 MCP 统一调度这些能力——而业务代码保持独立部署、独立技术栈、独立发布节奏。
 
@@ -44,11 +44,11 @@ anc-hub 是一个进程外插件架构的控制中台。核心只做「插座」
         │ :8081 HTTPS   │ :8096 HTTP    │ :8094 TLS http2              │
         │ 控制台同源面   │ MCP IP 直连    │ 插件面 gRPC（TLS 终结）        │
         ▼               ▼               ▼                              │
-     nginx ──127.0.0.1:8095──▶  anc-hub  ◀──────── grpc_pass ────────┘
+     nginx ──127.0.0.1:8095──▶  plugin-hub  ◀──────── grpc_pass ────────┘
                                     │        （转发至 0.0.0.0:8093）
                      ┌──────────────┴──────────────┐
                      ▼                             ▼
-         PostgreSQL（anc_hub 库，:55432）  Redis Stream（db /2，:56380）
+         PostgreSQL（plugin_hub 库，:55432）  Redis Stream（db /2，:56380）
 ```
 
 | 面 | 中台监听 | 对外 | 承载 |
@@ -145,7 +145,7 @@ anc-hub 是一个进程外插件架构的控制中台。核心只做「插座」
 **1. 启动中台**（`DATABASE_URL` / `REDIS_URL` 缺一会拒绝启动；启动时自动跑数据库迁移）：
 
 ```bash
-DATABASE_URL=postgresql://u:p@127.0.0.1:5432/anc_hub \
+DATABASE_URL=postgresql://u:p@127.0.0.1:5432/plugin_hub \
 REDIS_URL=redis://127.0.0.1:6379/2 \
 HUB_HTTP_PORT=8092 \
 cargo run -p hub-server
@@ -183,7 +183,7 @@ curl -X POST http://127.0.0.1:8092/ingress/order-reader \
 
 MCP 为 HTTP 传输。本地开发连 `http://127.0.0.1:8092/mcp`；生产经 nginx 对外是 `https://hub.example.com/mcp`（同源面）或 `http://<host-ip>:8096/mcp`（IP 直连面）。
 
-客户端配置示例（Claude CLI：`claude mcp add --transport http --scope user anc-hub <url>`；ZCode：`~/.zcode/cli/config.json`）：
+客户端配置示例（Claude CLI：`claude mcp add --transport http --scope user plugin-hub <url>`；ZCode：`~/.zcode/cli/config.json`）：
 
 ```json
 { "type": "http", "url": "http://127.0.0.1:8092/mcp" }
@@ -316,7 +316,7 @@ go run ./cmd/hub-plugin new order-reader --dir /tmp/order-reader
 | 实例级治理 | `NODE_MAX_CONCURRENCY=32`（到顶背压快速失败）· `NODE_QUEUE_TIMEOUT_MS=100` · `BREAKER_FAILURE_THRESHOLD=5` · `BREAKER_COOLDOWN_SECS=10` |
 | 异步总线 | `ASYNC_WORKERS=4` · `BUS_MAX_DEPTH=100000`（到顶 429）· `BUS_MAX_DELIVERY=5`（用完进死信）· `BUS_CLAIM_MIN_IDLE_SECS=60` |
 | 数据留存 | `STREAM_RETENTION_HOURS=24` · `SPAN_RETENTION_DAYS=7` · `RUN_RETENTION_DAYS=90` · `AUDIT_RETENTION_DAYS=90` |
-| 运维 | `LOG_LEVEL=info` · `HUB_OPS_SOCKET=/run/anc-hub/ops.sock` · `BOOTSTRAP_TOKEN`（首次配置引导凭据，留空不启用） |
+| 运维 | `LOG_LEVEL=info` · `HUB_OPS_SOCKET=/run/plugin-hub/ops.sock` · `BOOTSTRAP_TOKEN`（首次配置引导凭据，留空不启用） |
 
 ## 部署
 
@@ -332,15 +332,15 @@ go run ./cmd/hub-plugin new order-reader --dir /tmp/order-reader
 **最小上线**：
 
 ```bash
-git clone https://github.com/mahingbun-dev/anc-hub && cd anc-hub
+git clone https://github.com/mahingbun-dev/plugin-hub && cd plugin-hub
 cp deploy/.env.example .env          # 至少填 PG_PASSWORD / REDIS_PASSWORD
-docker compose -p anc-hub -f deploy/docker-compose.yml --env-file .env up -d
+docker compose -p plugin-hub -f deploy/docker-compose.yml --env-file .env up -d
 curl http://127.0.0.1:8095/health    # {"ok":true,...}
 ```
 
 **对外暴露**（生产形态）：
 
-1. **nginx**：`deploy/nginx/hub-api-location.conf` 并入你的 HTTPS server 块（与控制台同源）；`anc-hub-grpc.conf`（8094，插件面 TLS 终结）与 `anc-hub-ip-mcp.conf`（8096，MCP IP 直连）放到 `/etc/nginx/conf.d/`，把 `server_name` 与证书路径改成你的，`nginx -t && nginx -s reload`。
+1. **nginx**：`deploy/nginx/hub-api-location.conf` 并入你的 HTTPS server 块（与控制台同源）；`plugin-hub-grpc.conf`（8094，插件面 TLS 终结）与 `plugin-hub-ip-mcp.conf`（8096，MCP IP 直连）放到 `/etc/nginx/conf.d/`，把 `server_name` 与证书路径改成你的，`nginx -t && nginx -s reload`。
 2. **跨机插件**：`.env` 里配 `HUB_PLUGIN_PUBLIC_ADDR=https://your-domain:8094`（插件自报地址的前缀），插件所在主机要能拨通它。
 
 ### 备份与恢复
@@ -348,13 +348,13 @@ curl http://127.0.0.1:8095/health    # {"ok":true,...}
 [`deploy/backup-pg.sh`](deploy/backup-pg.sh) 用容器自带 `pg_dump` 导出到备份目录，清理超过 `BACKUP_KEEP_DAYS`（默认 14）天的旧备份。装到宿主机 crontab：
 
 ```bash
-sudo cp deploy/backup-pg.sh /opt/anc-hub/ && sudo chmod +x /opt/anc-hub/backup-pg.sh
+sudo cp deploy/backup-pg.sh /opt/plugin-hub/ && sudo chmod +x /opt/plugin-hub/backup-pg.sh
 sudo crontab -e
 ```
 
 ```
 PATH=/usr/local/bin:/usr/bin:/bin
-17 3 * * * /opt/anc-hub/backup-pg.sh >> /opt/anc-hub/backups/backup.log 2>&1
+17 3 * * * /opt/plugin-hub/backup-pg.sh >> /opt/plugin-hub/backups/backup.log 2>&1
 ```
 
 > ⚠️ `PATH=` 首行不能省：docker 通常在 `/usr/local/bin`，而 cron 默认 PATH 只有 `/usr/bin:/bin`——少了它备份静默消失，唯一痕迹是 backup.log 里一行 `docker: command not found`。脚本自身也会检查 `docker` 并明确报错。
@@ -362,8 +362,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 **恢复**（备份带 `--clean --if-exists`，是覆盖式恢复）：
 
 ```bash
-gunzip -c backups/anc_hub-YYYYMMDD-HHMMSS.sql.gz \
-  | docker exec -i anc-hub-pg psql -U anc_hub -d anc_hub -p 55432
+gunzip -c backups/plugin_hub-YYYYMMDD-HHMMSS.sql.gz \
+  | docker exec -i plugin-hub-pg psql -U plugin_hub -d plugin_hub -p 55432
 ```
 
 > ⚠️ `-p 55432` 不能省：PG 在非默认端口上，unix socket 名随之是 `.s.PGSQL.55432`，`psql` 默认找 5432 的那个。
@@ -375,9 +375,9 @@ gunzip -c backups/anc_hub-YYYYMMDD-HHMMSS.sql.gz \
 管理面按设计全插件化，鉴权插件坏掉时靠这条通道救回：
 
 ```bash
-docker exec anc-hub hubctl status
-docker exec anc-hub hubctl list-plugins
-docker exec anc-hub hubctl delete-plugin <name> --yes    # 不可逆，必须显式确认
+docker exec plugin-hub hubctl status
+docker exec plugin-hub hubctl list-plugins
+docker exec plugin-hub hubctl delete-plugin <name> --yes    # 不可逆，必须显式确认
 ```
 
 ### 排障速查

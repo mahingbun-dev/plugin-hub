@@ -44,7 +44,7 @@ ping-callee（echo）── 把 text 回显，带回 trace_id
 
 ```bash
 docker run -d --name hub-pg  -e POSTGRES_USER=u -e POSTGRES_PASSWORD=p \
-  -e POSTGRES_DB=anc_hub -p 5432:5432 postgres:16
+  -e POSTGRES_DB=plugin_hub -p 5432:5432 postgres:16
 docker run -d --name hub-redis -p 6379:6379 redis:7
 ```
 
@@ -52,7 +52,7 @@ docker run -d --name hub-redis -p 6379:6379 redis:7
 
 ```bash
 # 仓库根目录
-DATABASE_URL=postgresql://u:p@127.0.0.1:5432/anc_hub \
+DATABASE_URL=postgresql://u:p@127.0.0.1:5432/plugin_hub \
 REDIS_URL=redis://127.0.0.1:6379/2 \
 HUB_HTTP_PORT=8092 \
 cargo run -p hub-server

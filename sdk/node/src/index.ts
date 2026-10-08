@@ -1,6 +1,6 @@
-// anc-hub 插件 SDK 的入口。
+// plugin-hub 插件 SDK 的入口。
 //
-// 用 TypeScript 写 anc-hub 插件的工具箱。**五件套**：
+// 用 TypeScript 写 plugin-hub 插件的工具箱。**五件套**：
 //
 //   | 件 | 位置 | 作用 |
 //   |---|---|---|

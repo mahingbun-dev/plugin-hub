@@ -1,4 +1,4 @@
-"""hubkit —— anc-hub 插件侧的服务端骨架（Python）。
+"""hubkit —— plugin-hub 插件侧的服务端骨架（Python）。
 
 插件作者只需要实现 :class:`hubkit.Plugin` 下的四件事，然后调用 :func:`hubkit.run`，
 骨架会处理掉其余一切：gRPC 服务、向中台自注册、心跳续期、被摘除后自动重新注册、

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# anc-hub PostgreSQL 备份。
+# plugin-hub PostgreSQL 备份。
 #
 # 为什么需要它：PG 从「借别人的实例」变成「本编排自带的容器」之后，
 # 数据就落在本机目录里了——不再有人替我们做备份。这个脚本补上这一环。
@@ -7,12 +7,12 @@
 # 调度：由**宿主机 crontab** 调用（脚本自己不设定时器）。装法见 README「备份与恢复」。
 #
 # 用法：
-#   /apps/anc-hub/backup-pg.sh
+#   /apps/plugin-hub/backup-pg.sh
 #
 # 环境变量（都有默认值，通常不必设；由 crontab 调用时不读 .env）：
-#   PG_CONTAINER      PG 容器名，默认 anc-hub-pg
+#   PG_CONTAINER      PG 容器名，默认 plugin-hub-pg
 #   PG_USER / PG_DB   连接用的用户与库，与 compose 里的一致
-#   BACKUP_DIR        输出目录，默认 /apps/anc-hub/backups
+#   BACKUP_DIR        输出目录，默认 /apps/plugin-hub/backups
 #   BACKUP_KEEP_DAYS  保留天数，默认 14
 #
 # 退出码：0 成功，非 0 失败（cron 会据此记录，故失败路径一律 exit 1）。
@@ -27,14 +27,14 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
-PG_CONTAINER="${PG_CONTAINER:-anc-hub-pg}"
-PG_USER="${PG_USER:-anc_hub}"
-PG_DB="${PG_DB:-anc_hub}"
+PG_CONTAINER="${PG_CONTAINER:-plugin-hub-pg}"
+PG_USER="${PG_USER:-plugin_hub}"
+PG_DB="${PG_DB:-plugin_hub}"
 # **端口不能省**：PG 以 `-p 55432` 启动时，unix socket 的名字是
 # `.s.PGSQL.55432`，而 pg_dump 默认去找 5432 的那个——不显式给端口会得到
 # 「connection to server on socket ... failed: No such file or directory」。
 PG_PORT="${PG_PORT:-55432}"
-BACKUP_DIR="${BACKUP_DIR:-/apps/anc-hub/backups}"
+BACKUP_DIR="${BACKUP_DIR:-/apps/plugin-hub/backups}"
 BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 
 # 备份是整库明文，别给同机其他用户看

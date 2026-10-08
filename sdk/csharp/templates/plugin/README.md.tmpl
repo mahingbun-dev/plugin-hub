@@ -1,6 +1,6 @@
 # @@name@@
 
-anc-hub 插件（C# / .NET）。
+plugin-hub 插件（C# / .NET）。
 
 ## 跑起来
 
@@ -274,7 +274,7 @@ public sealed class Plugin : IPlugin, IStateAware
 
 ## 部署
 
-按「独立容器」的方式部署（见 anc-gateway 仓库的 `docs/design.md`）：插件进程独立、
+按「独立容器」的方式部署（见 plugin-hub 仓库的 `docs/design.md`）：插件进程独立、
 用 gRPC 与中台通信、可与中台异机。生成的 `Dockerfile` 是多阶段构建，改成你们团队的
 镜像发布流程即可；运行镜像是 **`dotnet/aspnet`** 而不是 `dotnet/runtime`
 （插件用 Kestrel 托 gRPC 服务，框架引用里带着 `Microsoft.AspNetCore.App`）。
@@ -284,5 +284,5 @@ public sealed class Plugin : IPlugin, IStateAware
 ## 详见
 
 上面这四道关背后的完整背景——网络拓扑、注册期每一步校验的细节、常见故障的排查路径——
-**详见 anc-gateway 仓库的 `docs/plugin-onboarding.md`**。那份文档是插件接入的唯一入口，
+**详见 plugin-hub 仓库的 `docs/plugin-onboarding.md`**。那份文档是插件接入的唯一入口，
 本文件只保证你下完包就有一条能照着走的路。

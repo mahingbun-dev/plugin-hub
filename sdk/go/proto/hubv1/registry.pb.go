@@ -616,7 +616,7 @@ const file_hub_v1_registry_proto_rawDesc = "" +
 	"\bRegister\x12\x17.hub.v1.RegisterRequest\x1a\x18.hub.v1.RegisterResponse\x12@\n" +
 	"\tHeartbeat\x12\x18.hub.v1.HeartbeatRequest\x1a\x19.hub.v1.HeartbeatResponse\x12C\n" +
 	"\n" +
-	"Unregister\x12\x19.hub.v1.UnregisterRequest\x1a\x1a.hub.v1.UnregisterResponseBIZGgithub.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
+	"Unregister\x12\x19.hub.v1.UnregisterRequest\x1a\x1a.hub.v1.UnregisterResponseBIZGgithub.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
 
 var (
 	file_hub_v1_registry_proto_rawDescOnce sync.Once

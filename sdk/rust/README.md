@@ -1,6 +1,6 @@
-# anc-hub 插件 SDK（Rust）
+# plugin-hub 插件 SDK（Rust）
 
-用 Rust 写 anc-hub 插件的工具箱。
+用 Rust 写 plugin-hub 插件的工具箱。
 
 | 件 | 位置 | 作用 |
 |---|---|---|

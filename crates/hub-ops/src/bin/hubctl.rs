@@ -11,14 +11,14 @@
 //! hubctl delete-plugin <name> [--yes]
 //! ```
 //!
-//! socket 路径取 `HUB_OPS_SOCKET`，默认 `/run/anc-hub/ops.sock`。
+//! socket 路径取 `HUB_OPS_SOCKET`，默认 `/run/plugin-hub/ops.sock`。
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use hub_ops::{OpsRequest, OpsResponse};
 
-const DEFAULT_SOCKET: &str = "/run/anc-hub/ops.sock";
+const DEFAULT_SOCKET: &str = "/run/plugin-hub/ops.sock";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -114,7 +114,7 @@ fn parse(args: &[String]) -> Result<Option<OpsRequest>, String> {
 fn print_usage() {
     println!(
         "\
-hubctl —— anc-hub 主机面运维通道
+hubctl —— plugin-hub 主机面运维通道
 
 用法:
   hubctl status                              中台自检（数据库、插件/版本/实例计数、配置摘要）

@@ -27,7 +27,7 @@ pub const DEFAULT_GRPC_PORT: u16 = 8093;
 /// 运维通道的默认 socket 路径。
 ///
 /// 选 `/run` 下的独立目录：该目录只有 root 可写，天然构成运维通道的信任边界。
-pub const DEFAULT_OPS_SOCKET: &str = "/run/anc-hub/ops.sock";
+pub const DEFAULT_OPS_SOCKET: &str = "/run/plugin-hub/ops.sock";
 
 pub const DEFAULT_LOG_LEVEL: &str = "info";
 pub const DEFAULT_SPAN_RETENTION_DAYS: u32 = 7;
@@ -448,7 +448,7 @@ mod tests {
 
     fn minimal() -> Vec<(&'static str, &'static str)> {
         vec![
-            ("DATABASE_URL", "postgresql://u:p@127.0.0.1:55432/anc_hub"),
+            ("DATABASE_URL", "postgresql://u:p@127.0.0.1:55432/plugin_hub"),
             ("REDIS_URL", "redis://127.0.0.1:6379/2"),
         ]
     }
@@ -761,7 +761,7 @@ mod tests {
 fn mcp_login_gate_默认关_显式开启才开() {
     let cfg = Config::from_source(|key| {
         Some(match key {
-            "DATABASE_URL" => "postgresql://u:p@127.0.0.1:5432/anc_hub".to_string(),
+            "DATABASE_URL" => "postgresql://u:p@127.0.0.1:5432/plugin_hub".to_string(),
             "REDIS_URL" => "redis://127.0.0.1:6379/2".to_string(),
             _ => return None,
         })
@@ -772,7 +772,7 @@ fn mcp_login_gate_默认关_显式开启才开() {
     for on in ["1", "true", "TRUE", "yes", "on"] {
         let cfg = Config::from_source(|key| {
             Some(match key {
-                "DATABASE_URL" => "postgresql://u:p@127.0.0.1:5432/anc_hub".to_string(),
+                "DATABASE_URL" => "postgresql://u:p@127.0.0.1:5432/plugin_hub".to_string(),
                 "REDIS_URL" => "redis://127.0.0.1:6379/2".to_string(),
                 "HUB_MCP_LOGIN_GATE" => on.to_string(),
                 _ => return None,
@@ -784,7 +784,7 @@ fn mcp_login_gate_默认关_显式开启才开() {
     for off in ["0", "false", "", "随便"] {
         let cfg = Config::from_source(|key| {
             Some(match key {
-                "DATABASE_URL" => "postgresql://u:p@127.0.0.1:5432/anc_hub".to_string(),
+                "DATABASE_URL" => "postgresql://u:p@127.0.0.1:5432/plugin_hub".to_string(),
                 "REDIS_URL" => "redis://127.0.0.1:6379/2".to_string(),
                 "HUB_MCP_LOGIN_GATE" => off.to_string(),
                 _ => return None,

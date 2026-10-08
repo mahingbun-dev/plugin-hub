@@ -1,6 +1,6 @@
-# anc-hub 插件 SDK（Python）
+# plugin-hub 插件 SDK（Python）
 
-用 Python 写 anc-hub 插件的工具箱。与 [`sdk/go`](../go) 是同一套契约的两门语言实现：
+用 Python 写 plugin-hub 插件的工具箱。与 [`sdk/go`](../go) 是同一套契约的两门语言实现：
 
 | 件 | 位置 | 作用 |
 |---|---|---|

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/hubkit"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/hubkit"
 )
 
 func Test解析常用选项(t *testing.T) {

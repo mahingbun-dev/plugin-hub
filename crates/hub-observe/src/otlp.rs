@@ -83,7 +83,7 @@ impl OtlpExporterConfig {
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
-            service_name: "anc-hub".to_string(),
+            service_name: "plugin-hub".to_string(),
             timeout: Duration::from_secs(5),
         }
     }
@@ -158,7 +158,7 @@ pub fn encode(spans: &[ExportedSpan], service_name: &str) -> Value {
                 "attributes": [attribute("service.name", &json!(service_name))]
             },
             "scopeSpans": [{
-                "scope": { "name": "anc-hub" },
+                "scope": { "name": "plugin-hub" },
                 "spans": spans.iter().map(encode_span).collect::<Vec<_>>()
             }]
         }]
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn 编码出_otlp_要求的顶层结构() {
-        let payload = encode(&[span("flow:intake")], "anc-hub");
+        let payload = encode(&[span("flow:intake")], "plugin-hub");
 
         let resource_spans = &payload["resourceSpans"][0];
         assert_eq!(
@@ -275,7 +275,7 @@ mod tests {
         );
         assert_eq!(
             resource_spans["resource"]["attributes"][0]["value"]["stringValue"],
-            "anc-hub"
+            "plugin-hub"
         );
 
         let spans = &resource_spans["scopeSpans"][0]["spans"];

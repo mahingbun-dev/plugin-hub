@@ -1,6 +1,6 @@
 # @@name@@
 
-anc-hub 插件（Rust）。用 [`hubkit`](@@sdk_path@@) 起一个 gRPC 服务，
+plugin-hub 插件（Rust）。用 [`hubkit`](@@sdk_path@@) 起一个 gRPC 服务，
 向中台自注册、按中台指定的周期发心跳、被摘除后自动重新注册、收到 SIGTERM 时优雅退出。
 
 **这份文件讲「怎么跑起来」；判断有没有接进来的四道关在 [`AGENTS.md`](AGENTS.md)。**
@@ -157,7 +157,7 @@ FileDescriptorSet 从 `descriptor()` 返回，并在 manifest 的 `produces` 里
 
 ## 部署
 
-按「独立容器」的方式部署（见 anc-gateway 仓库的 `docs/design.md`）：插件进程独立、
+按「独立容器」的方式部署（见 plugin-hub 仓库的 `docs/design.md`）：插件进程独立、
 用 gRPC 与中台通信、可与中台异机。生成的 `Dockerfile` 是多阶段构建，改成你们团队的
 镜像发布流程即可。
 
@@ -167,4 +167,4 @@ FileDescriptorSet 从 `descriptor()` 返回，并在 manifest 的 `produces` 里
 ## 详见
 
 四道关背后的完整背景——网络拓扑、注册期每一步校验的细节、常见故障的排查路径——
-**详见 anc-gateway 仓库的 `docs/plugin-onboarding.md`**。
+**详见 plugin-hub 仓库的 `docs/plugin-onboarding.md`**。

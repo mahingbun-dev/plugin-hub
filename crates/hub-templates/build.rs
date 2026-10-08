@@ -63,7 +63,7 @@ const NON_PAYLOAD_DIRS: &[&str] = &["_shared"];
 ///
 /// **为什么要把 SDK 源码随包发**：生成的工程要用 `replace` 指到 SDK，而后者的
 /// 路径在开发者机器上不存在（内网没有私有 Go module 代理，模板里原本写的是
-/// `/path/to/anc-gateway/sdk/go` 这个占位）——于是「下载一个工程」这件事根本
+/// `/path/to/plugin-hub/sdk/go` 这个占位）——于是「下载一个工程」这件事根本
 /// 落不了地：包能下、能解压，就是编不过。带上源码，`replace` 就能指向包内的
 /// 相对路径，拿到手就能跑。
 ///
@@ -92,7 +92,7 @@ const SDK_SOURCES: &[(&str, &str, &str, &str, &[&str])] = &[
         "go",
         "../../sdk/go",
         "sdk",
-        "github.com/mahingbun-dev/anc-hub/sdk/go",
+        "github.com/mahingbun-dev/plugin-hub/sdk/go",
         &["vendor", "cmd/hub-plugin"],
     ),
     (

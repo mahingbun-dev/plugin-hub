@@ -1,4 +1,4 @@
-// Package hubkit 是 anc-hub 插件侧的服务端骨架。
+// Package hubkit 是 plugin-hub 插件侧的服务端骨架。
 //
 // 插件作者只需要实现 [Plugin] 接口，然后调用 [Run]，骨架会处理掉其余一切：
 // gRPC 服务、向中台自注册、心跳续期、被摘除后自动重新注册、优雅退出。
@@ -28,7 +28,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1"
+	"github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1"
 )
 
 // Plugin 是插件必须实现的接口。

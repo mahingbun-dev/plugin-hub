@@ -29,7 +29,7 @@ import { pathToFileURL } from 'node:url'
 // conformance / state / proto / mockhub / run 这几个运行时文件里，`conform` 才需要。
 import { resolveOnboarding, scaffold, SDK_COPY_EXCLUDED } from './scaffold.ts'
 
-const USAGE = `anc-hub 插件脚手架
+const USAGE = `plugin-hub 插件脚手架
 
 用法：
   hub-plugin new <插件名> [选项]      生成一个可运行的插件工程

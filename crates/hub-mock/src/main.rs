@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     axum::routing::get(|| async {
                         axum::Json(serde_json::json!({
                             "status": "ok",
-                            // 这一个字段是「我打的是谁」的判据：真中台报的是 anc-hub
+                            // 这一个字段是「我打的是谁」的判据：真中台报的是 plugin-hub
                             "name": hub_mock::MOCK_NAME,
                             "version": env!("CARGO_PKG_VERSION"),
                         }))
