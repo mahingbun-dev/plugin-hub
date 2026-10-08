@@ -63,9 +63,9 @@ use hub_proto::v1::hub_state_server::HubState;
 use hub_proto::v1::plugin_registry_server::PluginRegistry;
 use hub_proto::v1::{
     HeartbeatRequest, HeartbeatResponse, KvDeleteRequest, KvDeleteResponse, KvEntry, KvGetRequest,
-    KvGetResponse, KvKey, KvPutRequest, KvPutResponse, KvScanRequest, KvScanResponse, PublishRequest,
-    PublishResponse, RegisterRequest, RegisterResponse, RejectCode, Rejection, UnregisterRequest,
-    UnregisterResponse,
+    KvGetResponse, KvKey, KvPutRequest, KvPutResponse, KvScanRequest, KvScanResponse,
+    PublishRequest, PublishResponse, RegisterRequest, RegisterResponse, RejectCode, Rejection,
+    UnregisterRequest, UnregisterResponse,
 };
 use hub_registry::{PluginProbe, RegistryConfig, reject};
 use prost::Message as _;
@@ -638,7 +638,13 @@ impl HubState for MockService {
         let inner = request.into_inner();
         let key = key_of(inner.key)?;
         self.registry
-            .state_put(&plugin, &key.namespace, &key.key, inner.value, inner.ttl_seconds)
+            .state_put(
+                &plugin,
+                &key.namespace,
+                &key.key,
+                inner.value,
+                inner.ttl_seconds,
+            )
             .map_err(Status::invalid_argument)?;
         Ok(Response::new(KvPutResponse {}))
     }
@@ -649,7 +655,9 @@ impl HubState for MockService {
     ) -> Result<Response<KvDeleteResponse>, Status> {
         let plugin = self.authenticate(&request)?;
         let key = key_of(request.into_inner().key)?;
-        let deleted = self.registry.state_delete(&plugin, &key.namespace, &key.key);
+        let deleted = self
+            .registry
+            .state_delete(&plugin, &key.namespace, &key.key);
         Ok(Response::new(KvDeleteResponse { deleted }))
     }
 
@@ -974,10 +982,7 @@ mod tests {
             "glpat-xxxxxxxxxxxxxxxxxxxx",
             "mock-state-token-不存在的实例",
         ] {
-            assert!(
-                r.plugin_of_token(bad).is_none(),
-                "{bad:?} 不该反查出插件名"
-            );
+            assert!(r.plugin_of_token(bad).is_none(), "{bad:?} 不该反查出插件名");
         }
     }
 
@@ -1083,7 +1088,10 @@ mod tests {
         let err = r
             .state_put(&plugin, "ns", "k", vec![0u8; MAX_VALUE_BYTES + 1], 0)
             .expect_err("超过一个字节就该拒");
-        assert!(err.contains(&MAX_VALUE_BYTES.to_string()), "错误里应带上限：{err}");
+        assert!(
+            err.contains(&MAX_VALUE_BYTES.to_string()),
+            "错误里应带上限：{err}"
+        );
     }
 
     #[tokio::test]
@@ -1106,7 +1114,10 @@ mod tests {
             (false, Vec::new()),
             "B 不该读到 A 的状态"
         );
-        assert!(r.state_scan(&b, "ns", "", 100).is_empty(), "B 不该扫到 A 的条目");
+        assert!(
+            r.state_scan(&b, "ns", "", 100).is_empty(),
+            "B 不该扫到 A 的条目"
+        );
 
         // 反过来 B 写自己的，也不该覆盖 A 的
         r.state_put(&b, "ns", "k", b"b-secret".to_vec(), 0).unwrap();
@@ -1140,11 +1151,16 @@ mod tests {
 
         let err = svc
             .kv_get(Request::new(KvGetRequest {
-                key: 键("ns", "k"),
+                key: 键("ns", "k")
             }))
             .await
             .expect_err("没带凭证应当被拒");
-        assert_eq!(err.code(), tonic::Code::Unauthenticated, "实际 {}", err.message());
+        assert_eq!(
+            err.code(),
+            tonic::Code::Unauthenticated,
+            "实际 {}",
+            err.message()
+        );
     }
 
     #[tokio::test]
@@ -1154,7 +1170,12 @@ mod tests {
 
         for bad in ["garbage", "glpat-xxxxxxxxxxxxxxxxxxxx"] {
             let err = svc
-                .kv_get(带凭证(KvGetRequest { key: 键("ns", "k") }, bad))
+                .kv_get(带凭证(
+                    KvGetRequest {
+                        key: 键("ns", "k")
+                    },
+                    bad,
+                ))
                 .await
                 .expect_err("无效凭证应当被拒");
             assert_eq!(err.code(), tonic::Code::Unauthenticated, "凭证 {bad:?}");
@@ -1180,7 +1201,12 @@ mod tests {
         .expect("写入应当成功");
 
         let got = svc
-            .kv_get(带凭证(KvGetRequest { key: 键("ns", "k") }, &token))
+            .kv_get(带凭证(
+                KvGetRequest {
+                    key: 键("ns", "k")
+                },
+                &token,
+            ))
             .await
             .expect("读取应当成功")
             .into_inner();
@@ -1188,7 +1214,12 @@ mod tests {
         assert_eq!(got.value, b"hello");
 
         let deleted = svc
-            .kv_delete(带凭证(KvDeleteRequest { key: 键("ns", "k") }, &token))
+            .kv_delete(带凭证(
+                KvDeleteRequest {
+                    key: 键("ns", "k")
+                },
+                &token,
+            ))
             .await
             .expect("删除应当成功")
             .into_inner();

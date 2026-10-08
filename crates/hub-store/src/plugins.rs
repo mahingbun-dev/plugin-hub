@@ -96,12 +96,10 @@ pub async fn latest_version(pool: &PgPool, plugin_id: i64) -> Result<Option<Plug
 /// 调用方声明了哪些可调用的目标插件（`invokes`），只存在于 manifest 字节里，
 /// 没有也不值得为它单独立表。版本不存在返回 `None`。
 pub async fn manifest_of_version(pool: &PgPool, version_id: i64) -> Result<Option<Vec<u8>>> {
-    let row = sqlx::query_as::<_, (Vec<u8>,)>(
-        "SELECT manifest FROM plugin_versions WHERE id = $1",
-    )
-    .bind(version_id)
-    .fetch_optional(pool)
-    .await?;
+    let row = sqlx::query_as::<_, (Vec<u8>,)>("SELECT manifest FROM plugin_versions WHERE id = $1")
+        .bind(version_id)
+        .fetch_optional(pool)
+        .await?;
     Ok(row.map(|(manifest,)| manifest))
 }
 

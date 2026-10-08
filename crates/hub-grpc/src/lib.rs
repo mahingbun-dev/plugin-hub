@@ -13,8 +13,8 @@
 
 use std::net::SocketAddr;
 
-use hub_proto::v1::plugin_gateway_server::PluginGatewayServer;
 use hub_proto::v1::hub_state_server::HubStateServer;
+use hub_proto::v1::plugin_gateway_server::PluginGatewayServer;
 use hub_proto::v1::plugin_registry_server::{PluginRegistry, PluginRegistryServer};
 use hub_proto::v1::{
     HeartbeatRequest, HeartbeatResponse, RegisterRequest, RegisterResponse, UnregisterRequest,

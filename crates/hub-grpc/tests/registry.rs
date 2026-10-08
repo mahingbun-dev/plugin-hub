@@ -54,7 +54,10 @@ async fn 注销带对凭证能摘掉实例(pool: PgPool) {
     let token = ctx
         .register_plugin("unreg-ok", "1.0.0", "http://127.0.0.1:9000")
         .await;
-    assert!(!token.is_empty(), "注册成功必须下发凭证，否则这个用例什么也证明不了");
+    assert!(
+        !token.is_empty(),
+        "注册成功必须下发凭证，否则这个用例什么也证明不了"
+    );
     let mut client = registry_client(&ctx).await;
     assert!(alive(&mut client, "unreg-ok-i1").await, "注册后应在线");
 

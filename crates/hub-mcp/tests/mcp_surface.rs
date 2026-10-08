@@ -836,7 +836,7 @@ async fn 经聚合工具调用会打到插件并带上工具名(pool: PgPool) {
     );
     // 闸门关、无登录态：绝不注入空壳键——插件以「缺键」识别匿名调用
     assert!(
-        seen.meta.get("hub.mas_token").is_none(),
+        !seen.meta.contains_key("hub.mas_token"),
         "无登录态时不得注入 hub.mas_token：{:?}",
         seen.meta
     );
@@ -1145,8 +1145,7 @@ async fn mcp_request_with_host(
 async fn 默认白名单会拒掉外部_host(pool: PgPool) {
     let h = harness(Store::from_pool(pool));
 
-    let (_, _, status) =
-        mcp_request_with_host(&h.app, None, "hub.example.com", init_body()).await;
+    let (_, _, status) = mcp_request_with_host(&h.app, None, "hub.example.com", init_body()).await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
@@ -1481,7 +1480,6 @@ async fn 不支持弹窗的客户端经login工具建立身份后插件调用放
     assert_eq!(subject.scopes, vec!["hub:read", "hub:invoke"]);
 }
 
-
 /// **插件调用层故障（不可达 / 超时）返回结构化错误卡，而不是 JSON-RPC error。**
 ///
 /// 之前这类失败走 `Err(internal)`，agent 看到的是一层客户端各自渲染的传输层
@@ -1512,7 +1510,9 @@ async fn 插件不可达时返回结构化错误卡(pool: PgPool) {
         rpc_error.is_none(),
         "调用层故障不该以 JSON-RPC error 逃逸：{value}"
     );
-    let text = value["result"]["content"][0]["text"].as_str().expect("结果应为文本");
+    let text = value["result"]["content"][0]["text"]
+        .as_str()
+        .expect("结果应为文本");
     let card: serde_json::Value = serde_json::from_str(text).expect("结果应可解析");
     assert_eq!(card["status"], "error", "卡上要说明这是调用层故障：{card}");
     assert_eq!(card["decision"], "reject");
@@ -1621,4 +1621,3 @@ async fn 登录后插件调用在信封meta里带上mas_token且审计不含它(
         "审计 span 不得包含 masToken：{text}"
     );
 }
-

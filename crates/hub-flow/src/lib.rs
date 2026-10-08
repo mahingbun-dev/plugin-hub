@@ -13,9 +13,9 @@ pub mod definition;
 pub mod plan;
 pub mod validate;
 
-pub use definition::{is_valid_name, Edge, FlowDefinition, Node, MAX_NODES, NAME_PATTERN};
-pub use plan::{plan, ExecutionPlan, PlanError};
+pub use definition::{Edge, FlowDefinition, MAX_NODES, NAME_PATTERN, Node, is_valid_name};
+pub use plan::{ExecutionPlan, PlanError, plan};
 pub use validate::{
-    has_errors, pick_version, summarize, validate, Code, FlowIssue, PluginAvailability,
-    PluginVersion, ResolvedNode, Severity, MAX_NODE_TIMEOUT_MS,
+    Code, FlowIssue, MAX_NODE_TIMEOUT_MS, PluginAvailability, PluginVersion, ResolvedNode,
+    Severity, has_errors, pick_version, summarize, validate,
 };

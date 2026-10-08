@@ -46,6 +46,9 @@ __pycache__/
 # Node
 node_modules/
 
+# Mimosa 安全钩子的本地状态（基线快照与会话记录，不入库）
+.mimosa/
+
 # 编辑器与系统
 .idea/
 .vscode/

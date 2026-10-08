@@ -33,14 +33,14 @@ use hub_proto::v1::{
 use hub_registry::probe::AlwaysHealthy;
 use hub_registry::{PluginProbe, Registry, RegistryConfig};
 use hub_store::Store;
-use redis::aio::ConnectionManager;
+use hub_testkit::{Behavior, Fixture, MESSAGE_FQ};
 use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 use serde_json::json;
 use sqlx::PgPool;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 use tonic::{Code, Request, Response, Status};
-use hub_testkit::{Behavior, Fixture, MESSAGE_FQ};
 
 /// 夹具句柄。
 ///
@@ -94,7 +94,8 @@ async fn setup_gateway(
         .expect("监听失败");
     let addr = listener.local_addr().expect("取地址失败");
 
-    let mut gateway = GatewayService::new(store.pool().clone(), redis.clone()).with_call_policy(policy);
+    let mut gateway =
+        GatewayService::new(store.pool().clone(), redis.clone()).with_call_policy(policy);
     if with_invoker {
         // 与 flow / Publish 共用同一条 Invoker 链路——网关代调不该另起炉灶，
         // 否则「Invoke 里发生了什么」和「flow 节点里发生了什么」会是两套行为
@@ -279,7 +280,10 @@ async fn 发现三件套_清单_消息端点与字段级_schema(pool: PgPool) {
                 .iter()
                 .find(|e| e.plugin == name)
                 .unwrap_or_else(|| panic!("{name} 应在消息端点里"));
-            assert_eq!(endpoint.version, "1.0.0", "端点要带版本，多版本共存时才查得清");
+            assert_eq!(
+                endpoint.version, "1.0.0",
+                "端点要带版本，多版本共存时才查得清"
+            );
         }
     }
 
@@ -301,7 +305,10 @@ async fn 发现三件套_清单_消息端点与字段级_schema(pool: PgPool) {
     assert!(resp.produces.iter().any(|c| c.fq_name == MESSAGE_FQ));
     assert!(resp.consumes.iter().any(|c| c.fq_name == MESSAGE_FQ));
     assert!(resp.invokes.is_empty(), "b 没声明互调，名单应为空");
-    assert!(resp.schema_json.is_empty(), "没指定 fq_name 就不摊平 schema");
+    assert!(
+        resp.schema_json.is_empty(),
+        "没指定 fq_name 就不摊平 schema"
+    );
 
     // ---- GetContract：带 fq_name，摊平字段级 schema，并带出 invokes 声明 ----
     let resp = client
@@ -616,7 +623,11 @@ async fn 配额打满后拒绝且只影响自己(pool: PgPool) {
     let resp = invoke(&mut client, &token, call("quota-3"))
         .await
         .expect("invoke 应可调用");
-    assert_eq!(resp.outcome, InvokeOutcome::Error as i32, "超过配额必须被拒");
+    assert_eq!(
+        resp.outcome,
+        InvokeOutcome::Error as i32,
+        "超过配额必须被拒"
+    );
     assert!(
         resp.reason.contains("上限"),
         "原因要说清是撞了配额：{}",
@@ -763,7 +774,10 @@ async fn 互调审计_span_落库_每个出口一条(pool: PgPool) {
     }
 
     // 成功那条的细节：outcome、幂等键与本跳 caller 入链
-    let ok = spans.iter().find(|s| s.status == "ok").expect("成功那次应落 ok");
+    let ok = spans
+        .iter()
+        .find(|s| s.status == "ok")
+        .expect("成功那次应落 ok");
     assert_eq!(ok.name, "gateway.invoke.audit-b");
     let attrs = ok.attributes.as_ref().expect("ok span 应带属性");
     assert_eq!(attrs["outcome"], "HANDLED");
@@ -846,10 +860,7 @@ async fn 无凭证与伪造凭证_四个rpc统一拒绝(pool: PgPool) {
         let mut client = client.clone();
         // 发现面三条 + 互调一条：每个 RPC 都过同一道闸
         let res = client
-            .list_plugins(attach(
-                Request::new(ListPluginsRequest::default()),
-                token,
-            ))
+            .list_plugins(attach(Request::new(ListPluginsRequest::default()), token))
             .await;
         expect_unauth(label, "list_plugins", res);
 

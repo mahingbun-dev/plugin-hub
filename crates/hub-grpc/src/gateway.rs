@@ -21,8 +21,8 @@ use hub_proto::v1::{
     ListPluginsResponse, MessageContract, MessageEndpoint, PayloadType, PluginManifest,
     PluginSummary, ToolDecl,
 };
-use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 // manifest 字节 → PluginManifest 结构的解码走 prost 的 Message trait
 use prost::Message as _;
 use sqlx::PgPool;
@@ -725,9 +725,7 @@ impl PluginGateway for GatewayService {
         // ---- 6. 结果映射 + 7. 审计 ----
         match outcome {
             Ok(EngineOutcome::Handled {
-                target,
-                envelope,
-                ..
+                target, envelope, ..
             }) => {
                 self.record_invoke_span(
                     &trace_id,
@@ -925,6 +923,9 @@ mod tests {
         // 空 descriptor 是合法的（只用 Struct 载荷的插件）
         assert_eq!(flatten_schema(&[], "wms.v1.OrderCreated"), "");
         // 不是合法 descriptor 字节（byte string 只装得下 ASCII，取一段越界字节）
-        assert_eq!(flatten_schema(&[0xff, 0xfe, 0xfd], "wms.v1.OrderCreated"), "");
+        assert_eq!(
+            flatten_schema(&[0xff, 0xfe, 0xfd], "wms.v1.OrderCreated"),
+            ""
+        );
     }
 }

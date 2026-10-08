@@ -18,10 +18,11 @@
 //! 两处的答案本来就不同。
 
 use std::io::Read;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use hub_templates::{build_zip, find, Values};
+use hub_templates::{Values, build_zip, find};
 
 /// 本地渲染时 `@@hub_addr@@` 的取值。与 `sdk/go/cmd/hub-plugin` 的 `localHubAddr` 一致。
 const LOCAL_HUB_ADDR: &str = "http://127.0.0.1:8093";
@@ -68,7 +69,10 @@ fn run() -> Result<(), String> {
 
     let lang = find(lang_id).ok_or_else(|| {
         let known: Vec<&str> = hub_templates::languages().iter().map(|l| l.id).collect();
-        format!("不认识的插件语言 {lang_id:?}；认得的有：{}", known.join(" / "))
+        format!(
+            "不认识的插件语言 {lang_id:?}；认得的有：{}",
+            known.join(" / ")
+        )
     })?;
 
     let dir = dir.ok_or("缺少 --dir（生成到哪个目录）")?;
@@ -126,14 +130,16 @@ fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<String, Stri
 /// 包内顶层是**一层以插件名命名的目录**（下载下来解压即得一个工程目录），
 /// 而命令行上的 `--dir` 语义是「工程就落在这个目录」，所以这一层要去掉——
 /// 否则会得到一个 `dir/order-reader/plugin.go`，与各语言本地脚手架的行为不一致。
-fn extract(bytes: &[u8], dest: &PathBuf, plugin: &str) -> Result<usize, String> {
+fn extract(bytes: &[u8], dest: &Path, plugin: &str) -> Result<usize, String> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|e| format!("产出的包不是合法 zip：{e}"))?;
     let prefix = format!("{plugin}/");
     let mut written = 0usize;
 
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).map_err(|e| format!("读包内第 {i} 项失败：{e}"))?;
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("读包内第 {i} 项失败：{e}"))?;
         let name = entry.name().to_string();
         let Some(rel) = name.strip_prefix(&prefix) else {
             return Err(format!("包内路径 {name} 不在 {prefix} 之下"));

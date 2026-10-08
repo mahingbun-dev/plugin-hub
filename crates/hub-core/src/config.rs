@@ -448,7 +448,10 @@ mod tests {
 
     fn minimal() -> Vec<(&'static str, &'static str)> {
         vec![
-            ("DATABASE_URL", "postgresql://u:p@127.0.0.1:55432/plugin_hub"),
+            (
+                "DATABASE_URL",
+                "postgresql://u:p@127.0.0.1:55432/plugin_hub",
+            ),
             ("REDIS_URL", "redis://127.0.0.1:6379/2"),
         ]
     }

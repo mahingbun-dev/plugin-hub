@@ -242,6 +242,9 @@ pub use hub_core::AuthenticatedSubject;
 /// 问 auth 插件「这个凭证是谁、有哪几个权限位」。
 ///
 /// 返回值里的 `Err` 已经是一个可以直接回给调用方的响应。
+// Err 直接携带 axum Response（其 Body 本身就胖）是本 crate 的统一形态；
+// 该函数在管理面每请求至多一次，不是热路径——对 result_large_err 显式豁免。
+#[allow(clippy::result_large_err)]
 async fn authenticate(
     state: &ApiState,
     config: &AuthzConfig,

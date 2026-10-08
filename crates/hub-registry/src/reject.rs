@@ -105,6 +105,9 @@ pub fn instance_id_owner_rejection(
 }
 
 /// 注册请求最前面那几步的校验结果。
+// Ok 变体比 Reject 大一个量级，但它只活在注册调用栈上、用完即弃，
+// box 化徒增一次堆分配——对 large_enum_variant 显式豁免。
+#[allow(clippy::large_enum_variant)]
 pub enum Preflight {
     /// 拦下了。**一次给全部问题**——真中台就是这么回的，
     /// 让插件方一次改完而不是来回试。

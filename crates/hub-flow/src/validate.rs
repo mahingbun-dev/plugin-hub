@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::definition::{is_valid_name, FlowDefinition, MAX_NODES};
+use crate::definition::{FlowDefinition, MAX_NODES, is_valid_name};
 
 /// 节点超时的建议上限。超过它多半意味着这个插件该改成异步处理。
 pub const MAX_NODE_TIMEOUT_MS: i64 = 300_000;

@@ -1132,7 +1132,9 @@ impl HubMcp {
             };
             match self.login_via_auth_plugin(&account, &password).await? {
                 Ok(identity) => {
-                    return Ok(LoginOutcome::Authenticated(self.login_cache.store(identity)));
+                    return Ok(LoginOutcome::Authenticated(
+                        self.login_cache.store(identity),
+                    ));
                 }
                 Err(reason) if attempt == 0 => {
                     let _ = reason; // 第二次弹窗的 message 已说明「上次失败」
@@ -2148,7 +2150,11 @@ mod login_cache_tests {
     use super::*;
 
     /// 造一条已建立的登录身份（绕过 parse，直接测缓存语义）。
-    fn identity(user: &str, mas_token: Option<&str>, expires_at_ms: Option<i64>) -> EstablishedIdentity {
+    fn identity(
+        user: &str,
+        mas_token: Option<&str>,
+        expires_at_ms: Option<i64>,
+    ) -> EstablishedIdentity {
         EstablishedIdentity {
             subject: Subject {
                 kind: SubjectKind::Human as i32,
