@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package hub.v1;
+
+option go_package = "github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1";
+
+import "google/protobuf/any.proto";
+
+// 统一信封：所有在插件之间、以及插件与中台之间流动的数据都是 Envelope。
+//
+// 中台强制这个形状，插件不感知 HTTP / MQ / cron 等触发来源的差异——
+// 触发器只负责把外部输入装配成一个 Envelope。
+
+// 调用主体：谁触发了这次数据流。
+//
+// 管理面与控制面按设计是全插件化的（中台自身不含鉴权逻辑），
+// subject 由鉴权插件填充，中台只负责透传、审计与限流。
+message Subject {
+  SubjectKind kind = 1;
+
+  // 人类为 userCode；agent 为会话 id；插件为插件名；系统为子系统标识
+  string id = 2;
+
+  string tenant = 3;
+
+  // 权限位，供下游插件做业务级鉴权
+  repeated string scopes = 4;
+
+  // 原始凭证来源的描述。仅透传，不落库。
+  string origin = 5;
+}
+
+enum SubjectKind {
+  SUBJECT_KIND_UNSPECIFIED = 0;
+  SUBJECT_KIND_HUMAN = 1;
+  SUBJECT_KIND_AGENT = 2;
+  SUBJECT_KIND_PLUGIN = 3;
+  SUBJECT_KIND_SYSTEM = 4;
+}
+
+// 载荷在数据流中的语义
+enum PayloadType {
+  PAYLOAD_TYPE_UNSPECIFIED = 0;
+  PAYLOAD_TYPE_REQUEST = 1;
+  PAYLOAD_TYPE_EVENT = 2;
+  PAYLOAD_TYPE_COMMAND = 3;
+  PAYLOAD_TYPE_RESULT = 4;
+}
+
+// 超限载荷的引用。
+//
+// 载荷内联上限 4MB（可配）；超出时改走引用传递，payload 留空、payload_ref 填写。
+// 物流场景的大单据与附件走这条路，避免顶爆内存、Redis Stream 与 gRPC 消息上限。
+message PayloadRef {
+  string uri = 1;
+
+  // 内容摘要，用于校验引用内容未被篡改
+  string sha256 = 2;
+
+  uint64 size_bytes = 3;
+
+  string content_type = 4;
+}
+
+message Envelope {
+  // ULID，同时作为幂等键来源（总线是 at-least-once，去重靠它）
+  string message_id = 1;
+
+  // W3C Trace Context
+  string trace_id = 2;
+  string span_id = 3;
+
+  string flow_id = 4;
+  string run_id = 5;
+  string node_id = 6;
+
+  string tenant = 7;
+
+  Subject subject = 8;
+
+  // 绝对 deadline（Unix 毫秒）。逐跳递减，插件应据此提前放弃而不是把时间耗光。
+  int64 deadline_ms = 9;
+
+  PayloadType type = 10;
+
+  // 业务载荷。
+  //
+  // 契约标识 = type_url 的最后一段（全限定消息名），
+  // 例如 `type.googleapis.com/wms.v1.OrderCreated`。
+  // 中台在编排时静态校验上下游的全限定名能否对上，运行时校验实际类型是否符合 manifest。
+  google.protobuf.Any payload = 11;
+
+  // payload 超出内联上限时填此项，此时 payload 必须为空
+  PayloadRef payload_ref = 12;
+
+  map<string, string> meta = 13;
+}

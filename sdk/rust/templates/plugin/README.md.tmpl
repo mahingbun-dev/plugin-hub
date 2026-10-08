@@ -1,0 +1,170 @@
+# @@name@@
+
+anc-hub 插件（Rust）。用 [`hubkit`](@@sdk_path@@) 起一个 gRPC 服务，
+向中台自注册、按中台指定的周期发心跳、被摘除后自动重新注册、收到 SIGTERM 时优雅退出。
+
+**这份文件讲「怎么跑起来」；判断有没有接进来的四道关在 [`AGENTS.md`](AGENTS.md)。**
+两份都值得读——四道关那份是共通的（所有语言的插件模板同源），
+这份是 Rust 特有的细节。
+
+## 跑起来
+
+```bash
+cargo test          # L1 契约自洽（含中台注册期的同一套规则）
+cargo run           # 起来后自己向 HUB_ADDR 注册
+```
+
+不设环境变量直接 `cargo run` 会**明确报错**（缺 `HUB_ADDR` / `HUB_ADVERTISE_ADDR`），
+而不是安静地空转——这是刻意的：一个连不上中台却什么都不说的进程最难排查。
+
+```bash
+HUB_ADDR=http://127.0.0.1:8093 \
+HUB_ADVERTISE_ADDR=http://127.0.0.1:19000 \
+HUB_LISTEN_ADDR=127.0.0.1:19000 \
+cargo run
+```
+
+| 环境变量 | 必填 | 说明 |
+|---|---|---|
+| `HUB_ADDR` | 是 | 中台插件面地址。**本工程里填的是 `@@hub_addr@@`** |
+| `HUB_ADVERTISE_ADDR` | 是 | **中台能拨通**的本插件地址 |
+| `HUB_LISTEN_ADDR` | 否 | 本插件监听地址，缺省 `:9000`。接受省略主机的写法（`:9000` → `0.0.0.0:9000`） |
+| `HUB_INSTANCE_ID` | 否 | 实例标识，缺省「主机名-PID」。**不设**与设成**空串**是一回事（都会自动生成）；只有**纯空白**才会带着一个空白 id 去注册而被拒 |
+| `HUB_LOG_LEVEL` | 否 | `debug` / `info` / `warn` / `error`，缺省 `info` |
+
+## 日志长这样
+
+JSON、一行一条、打到 **stderr**（与 Go 侧同款，逐字段对齐）：
+
+```json
+{"time":"2026-09-18T02:47:43.521Z","level":"INFO","msg":"插件 gRPC 已监听","listen":"127.0.0.1:19000","advertise":"http://127.0.0.1:19000"}
+{"time":"2026-09-18T02:47:43.521Z","level":"INFO","msg":"插件已启动","hub":"http://127.0.0.1:8093","instance":"host-12345"}
+{"time":"2026-09-18T02:47:43.547Z","level":"INFO","msg":"已注册到中台","plugin":"@@name@@","version":"0.1.0","instance":"host-12345"}
+```
+
+看到 `"msg":"已注册到中台"` 才算这一关过了。时间是 **UTC**（带 `Z`）——与 Go 侧的本地
+时间不同，这是刻意的：日志要的是可比较。
+
+注册被拒时**每条原因各占一行**（`code` / `message` / `detail` 三列），最后一行收尾说明
+有几条原因与多久后重试——所以读日志不需要 `jq`，逐行读就是：
+
+```json
+{"level":"ERROR","msg":"中台拒绝了注册","code":"UNREACHABLE","message":"插件地址不可达","detail":"请确认 HUB_ADVERTISE_ADDR 填的是中台视角下可达的地址"}
+{"level":"ERROR","msg":"注册未通过，稍后重试","reasons":1,"retry_in":"5s"}
+```
+
+失败会**一直重试**（中台可能比你晚起来，这是刻意的），所以失败日志是反复刷的——
+别 `cat` 一次就下结论。
+
+## 插件模型
+
+- **校验器先行**：中台一定先调 `validate`，通过才调 `handle`。校验不通过时 `handle`
+  不会被调用，链路当场短路。
+- **强制无状态**：实例内存不保证跨调用保留（换来热切换零代价、可水平扩展）。
+- **契约不可漂移**：同一版本号的 manifest 与 proto 不可变更，改了请升版本号；
+  中台会拒绝「同号不同契约」的注册。
+- **预算来自信封**：`hubkit::envelope::budget(&env)` 给出剩余时间，紧张时应提前放弃，
+  而不是把时间耗光后靠上层超时兜底。
+
+## ⚠️ 最大的坑：`HUB_ADVERTISE_ADDR` 要写「中台视角」的地址
+
+中台在注册时会**连你上报的地址做可达性探测**，探不通直接拒绝注册（`UNREACHABLE`）。
+所以它是「从**中台那边**拨得通」的地址，而不是本机视角的 localhost：
+
+- 中台与本插件同机 → `http://127.0.0.1:9000` 可以
+- 中台在别的机器 → 必须写中台能拨通的内网 IP 或域名，例如 `http://203.0.113.10:9000`
+
+**在自己机器上 `curl 127.0.0.1:9000` 通了什么也证明不了**——判断标准始终是「中台的视角
+能否拨通」。容器部署时写宿主的内网 IP 或容器网络的 IP，不要写 `127.0.0.1`：
+那个回环地址在中台眼里指的是中台自己。
+
+`cargo test` 与任何本地自测都**验不了这一条**（它们走的是回环），这就是为什么
+「L1、L2 全绿 ≠ 能接入」。详见 `AGENTS.md` 的四道关。
+
+## 跨调用保留状态（HubState）
+
+需要跨调用保留的东西（登录缓存、去重标记、游标、限流计数）**不要**放实例内存，
+走中台的 HubState。宿主在**每次注册成功后**会把客户端注入进来，凭证不用你自己管。
+
+本工程**已经把客户端接好了**：`src/plugin.rs` 覆写了 `Plugin::set_state`，`handle`
+里有一个真的在用的例子（跨调用的调用计数）。你要做的只是把它换成自己的业务。
+
+```rust
+if let Some(state) = self.state() {          // None = 还没注册上，fail-open
+    // Ok(None) 是「没有这个键」，与「键在但值是空的」是两回事
+    let v = state.get("demo", "calls").await;        // Result<Option<Vec<u8>>, StateError>
+    // ttl 传 Duration::ZERO 表示不过期。**粒度是秒**，不足 1 秒会被截断成 0
+    let w = state.put("demo", "calls", b"1", Duration::from_secs(600)).await;
+    // Ok(false) 表示这键本来就不存在，**不是**错误
+    let existed = state.delete("demo", "calls").await; // Result<bool, StateError>
+    // prefix 传 "" = 扫整个命名空间；limit 必须在 1..=1000
+    let entries = state.scan("demo", "c:", 100).await; // Result<Vec<StateEntry>, StateError>
+}
+```
+
+⚠️ **`StateError` 不能 `?` 成 `PluginError`**（SDK 没有这个转换，也不该有：状态失败
+不是插件失败）。模板里示范的是显式 fail-open —— 状态调用失败时业务结果照常返回。
+别为了少写两行就把它 `unwrap()` 掉：中台抖一下，你的接口就跟着 500。
+
+几条容易踩的：
+
+- **namespace / key / prefix 只允许 `[A-Za-z0-9_.-]`**、非空、最长 200 字节。
+  中台按凭证反查你的插件名并强制加前缀 `hub:state:{插件名}:`，你填的 namespace
+  只是**子空间**。
+- **前缀里没有版本号**：同一插件的所有版本共用一个状态空间，升版本不会清空状态，
+  但两个版本往同一个 namespace 写就是互相覆盖。
+- **上限**：单值 1MB、一次 `scan` 最多 1000 条。
+- **`set_state` 只拿得到 `&self`**，所以那个字段得自己包 `Mutex` / `RwLock` /
+  `OnceLock`（模板用的是 `Mutex<Option<Arc<StateClient>>>`）。另外：`MutexGuard`
+  不是 `Send`，**别持着锁跨 `.await`**——模板里是先克隆出 `Arc` 再放锁。
+- **凭证失效时宿主会自动重新注册换新凭证**，不用你管。
+
+本地调试时 mock 中台也实现了这一套（键名规则与真中台同源），所以不必连真中台。
+
+## Rust 特有的几个坑
+
+**1. SDK 是包内的路径依赖，不是 registry 上的包。**
+
+```toml
+@@sdk_module@@ = { path = "@@sdk_path@@" }
+```
+
+`@@sdk_path@@/` 下是一份随工程下发的 SDK 源码。**不要改它**——它是副本，
+改了等于在你的工程里私藏一个分叉，中台侧升级后没人会想起来。要改 SDK 请回中台仓库。
+
+**2. 两个 `[workspace]` 是有意的，别删。**
+
+`@@sdk_path@@/Cargo.toml` 里有一个 `[workspace]`（它要能**单独构建**：随包发给开发者时
+中台仓库不在旁边），本工程 `Cargo.toml` 里的 `[workspace] exclude` 把它排除掉。
+删了任何一个，cargo 会报「package believes it's in a workspace when it's not」。
+
+**3. `#[@@sdk_module@@::async_trait]` 不能漏。**
+
+`Plugin` 是异步 trait，属性宏漏了会报一堆「method not found」，
+而报错信息里**不会提到 async_trait**——很容易往错的方向查。
+
+**4. 载荷里的数值一律是浮点。**
+
+`google.protobuf.Struct` 只有一种数值类型，`3` 走一个来回会变成 `3.0`。
+大单号这类超出 2^53 的整数请用**字符串**承载，别指望 JSON 数字。
+
+**5. 需要类型化契约时。**
+
+只用 `google.protobuf.Struct` 承载 JSON 的插件**没有自己的 proto**，`descriptor()`
+返回空即可。要与其他插件在 flow 里传类型化消息时，加一份 `.proto`、在 `build.rs` 里用
+`tonic_prost_build` 生成（配上 `.file_descriptor_set_path`），把那个
+FileDescriptorSet 从 `descriptor()` 返回，并在 manifest 的 `produces` 里声明。
+
+## 部署
+
+按「独立容器」的方式部署（见 anc-gateway 仓库的 `docs/design.md`）：插件进程独立、
+用 gRPC 与中台通信、可与中台异机。生成的 `Dockerfile` 是多阶段构建，改成你们团队的
+镜像发布流程即可。
+
+插件启动后会自己注册进中台，**不需要重启中台**；升级时先起新版本副本、再把 flow 的
+版本约束抬高即可灰度。容器里看 L3 的注册结果用 `docker logs -f <容器>`。
+
+## 详见
+
+四道关背后的完整背景——网络拓扑、注册期每一步校验的细节、常见故障的排查路径——
+**详见 anc-gateway 仓库的 `docs/plugin-onboarding.md`**。

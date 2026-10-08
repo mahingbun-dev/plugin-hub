@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hubkit"
+version = "0.1.0"
+description = "anc-hub 插件侧的服务端骨架（Python）：gRPC 服务、自注册、心跳、被摘除后自愈、优雅退出"
+readme = "README.md"
+requires-python = ">=3.9"
+
+# **依赖下限是钉死的，不是「至少这么新」的客套话。**
+#
+# proto/hubv1/ 下的生成代码里带两条运行时校验：
+#   * `_runtime_version.ValidateProtobufRuntimeVersion` —— 认 protobuf 运行时
+#   * `GRPC_GENERATED_VERSION`                          —— 认 grpcio
+# 装上更旧的版本会在 **import 期**直接抛错，而不是等到某个调用才出问题。
+# 所以重新生成 proto（`./generate.sh`）之后必须回来同步这两个下限。
+dependencies = [
+    "grpcio>=1.84.0",
+    "protobuf>=7.35.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/mahingbun-dev/anc-hub"
+
+# 依赖走公共镜像（内网可用）。写在这里是给**维护 SDK 的人**看的；
+# 插件工程侧的说明在模板生成的 README.md 里。
+#
+#   pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -e .
+
+[tool.setuptools]
+packages = [
+    "hubkit",
+    "hubkit.proto",
+    "hubkit.proto.hubv1",
+    "hubkit.conformance",
+    "hubkit.mockhub",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

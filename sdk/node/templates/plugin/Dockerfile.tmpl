@@ -1,0 +1,26 @@
+# @@name@@ 的运行镜像。
+#
+# 插件按「独立容器」的方式部署：进程独立、用 gRPC 与中台通信、可与中台异机。
+#
+# 内网离线环境：node 基础镜像需要预先导入服务器（docker load）；依赖从
+# registry.npmmirror.com 装，或在能上网的机器上 `npm install` 后把 node_modules
+# 一起打进去。
+
+FROM node:22-alpine
+WORKDIR /app
+
+# 先把依赖清单与 SDK 拷进来，利用层缓存：源码改动不会让依赖重装一遍。
+# sdk/ 必须在这里——package.json 里以 "file:./sdk" 引用它，少了它 npm install 直接失败
+COPY package.json ./
+COPY sdk ./sdk
+RUN npm install --omit=dev
+
+COPY . .
+
+# 中台能拨通的地址由部署时经 HUB_ADVERTISE_ADDR 注入——
+# 别在镜像里写死 localhost，中台在另一台机器上时它会连不上。
+ENV HUB_LISTEN_ADDR=:9000
+EXPOSE 9000
+
+# 直接用 node 跑 .ts：Node 22.18+ 默认剥离类型，不需要构建步骤
+CMD ["node", "src/main.ts"]

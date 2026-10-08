@@ -1,0 +1,22 @@
+{
+  "name": "@@package@@",
+  "version": "0.1.0",
+  "private": true,
+  "description": "anc-hub 插件 @@name@@",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@@sdk_module@@": "file:@@sdk_path@@"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

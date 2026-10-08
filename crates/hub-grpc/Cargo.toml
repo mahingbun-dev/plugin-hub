@@ -1,0 +1,46 @@
+[package]
+name = "hub-grpc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# 状态面的键规则与上限常量住在 hub-core：本地 mock 中台要用**同一份**判据，
+# 而它不能依赖本 crate（那会把 tonic 服务端连同 redis、sqlx 拖进一个本该
+# 「一个进程、无外部依赖」的替身）。hub-core 是零依赖的，两边都够得着。
+hub-core = { path = "../hub-core" }
+hub-proto = { path = "../hub-proto" }
+hub-registry = { path = "../hub-registry" }
+hub-store = { path = "../hub-store" }
+# 状态面的 `Publish` 要把信封投给下游 flow，那件事的实现在 hub-engine 里
+# （`AsyncExecutor::enqueue`）。看着像循环——hub-engine 的 dev-dependencies 里
+# 确实有 hub-grpc（它的集成测试要起真中台）——但那是 dev 依赖，cargo 允许这种
+# 单向环。与 hub-api 注入 `Option<AsyncExecutor>` 是同一个做法。
+hub-engine = { version = "0.1.0", path = "../hub-engine" }
+# 生产代码只用到 PgPool 这一个类型（状态面持有注册面的连接池）；
+# 迁移与宏只在测试夹具里用，见下面的 dev-dependencies。
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres"] }
+# 网关：策略校验要从存库的 manifest 字节解出 invokes；GetContract 的 schema_json
+# 只为读取复用 hub-contract（不新增公开 API）。审计 span 与 trace_id 生成、
+# 结果属性分别用 spans / ulid / serde_json。
+hub-contract = { version = "0.1.0", path = "../hub-contract" }
+prost = "0.14.4"
+ulid = "3.0.0"
+chrono = "0.4.45"
+serde_json = "1.0.151"
+tonic = { version = "0.14.6", features = ["transport", "codegen", "server"] }
+tracing = "0.1.44"
+# 与 hub-bus 同一版本；connection-manager 让连接在 Redis 抖动后自愈
+redis = { version = "1.7.0", features = ["tokio-comp", "connection-manager"] }
+thiserror = "2.0.20"
+
+[dev-dependencies]
+hub-testkit = { path = "../hub-testkit" }
+# 夹具要构造 `FlowExecutor`，而它需要中台→插件方向的 gRPC 客户端
+hub-plugin-client = { path = "../hub-plugin-client" }
+hub-bus = { version = "0.1.0", path = "../hub-bus" }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "migrate", "macros"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
+tokio-stream = "0.1"

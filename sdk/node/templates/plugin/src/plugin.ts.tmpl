@@ -1,0 +1,193 @@
+import {
+  emptyDescriptor,
+  invalid,
+  issue,
+  payloadJSON,
+  valid,
+  withPayloadJSON,
+  type CallContext,
+  type Envelope,
+  type ManifestInput,
+  type Plugin,
+  type StateAware,
+  type StateClient,
+  type ValidateResponse,
+} from '@@sdk_module@@'
+
+/**
+ * 继续处理所需的最小剩余预算。
+ *
+ * 信封带着绝对 deadline 逐跳递减；预算不够时应当提前放弃，让失败快速冒泡，
+ * 而不是把时间耗光后靠上层超时兜底——那样调用方连「为什么慢」都看不出来。
+ */
+const MIN_BUDGET_MS = 100
+
+/**
+ * @@name@@ 的实现。
+ *
+ * 它用 `google.protobuf.Struct` 承载 JSON 载荷：agent 经 MCP、外部系统经 HTTP
+ * 调用本插件时，中台会把 JSON 对象包成 Struct 送进来，用 `payloadJSON` 取。
+ *
+ * 如果需要与其他插件在 flow 里传递**类型化**的业务消息，再加一份自己的 `.proto`、
+ * 在 `descriptor()` 里返回它的 FileDescriptorSet，并在 manifest 的 `produces` 中声明。
+ * 同版本号的契约不可变更——改了要升版本号。
+ */
+class EchoPlugin implements Plugin, StateAware {
+  /**
+   * 跨调用状态（HubState）的客户端，由骨架在**每次注册成功后**注入。
+   *
+   * 它是 `undefined` 就说明这个插件走的是无状态那一路——**用它之前必须判空**。
+   * 本模板已经接好了注入（见下面的 `setState`），你只要在 `handle` 里用起来即可。
+   */
+  private state?: StateClient
+
+  /**
+   * 由骨架在注册成功后调用，把状态客户端交进来。
+   *
+   * # 什么时候需要它
+   *
+   * 插件实例**不保证**跨调用保留内存（热切换零代价、可水平扩展就是这么来的）。
+   * 要跨调用保留东西——登录缓存、去重标记、游标、限流计数——就得走 HubState。
+   *
+   * # 怎么用
+   *
+   * ```ts
+   * const [value, found] = await this.state!.get('sessions', userId)
+   * //   ↑ found 区分「键不存在」与「值是空字节」
+   * await this.state!.put('sessions', userId, blob, 30 * 60_000)
+   * //   ↑ ttlMs 为 0 表示不过期。**TTL 粒度是秒**，不足 1 秒会被截断成 0（=永不过期）
+   * const existed = await this.state!.delete('sessions', userId)
+   * const entries = await this.state!.scan('sessions', 'user:', 100)
+   * //   ↑ prefix 传 '' 表示扫整个命名空间；limit 必须在 1..=1000
+   * ```
+   *
+   * # 两个必须知道的约束
+   *
+   * - **命名空间是插件隔离的**：中台按注册凭证反查出你的插件名、强制拼进键前缀
+   *   （`hub:state:{插件名}:{namespace}:{key}`），你自报的 namespace 只是前缀下的
+   *   **子空间**。所以你只写自己的业务子空间（`sessions`、`cursors`），
+   *   既不需要也不应该写插件名。
+   * - **namespace / key / prefix 都只允许 `[A-Za-z0-9_.-]`、非空、最长 200 字节**。
+   *   放行 `*` 是漏洞不是功能：前缀靠字符串拼接，通配符会让 scan 变成跨命名空间的
+   *   模式匹配。
+   *
+   * 骨架在**每次注册成功后**都会再调一次（中台重启、实例被摘除后自愈），注入的
+   * 是**同一个对象**，凭证在它内部轮换——不要把它拷走长期持有。
+   *
+   * 本地调试时 mock 中台也实现了这一套（键名规则与真中台同源），所以不必连真中台。
+   */
+  setState(state: StateClient): void {
+    this.state = state
+  }
+
+  /**
+   * 声明插件的身份、契约与暴露给 agent 的能力。
+   *
+   * ⚠️ 同一版本号的 manifest 不可变更：中台会拒绝「同号不同契约」的注册，改了请升版本号。
+   */
+  manifest(): ManifestInput {
+    return {
+      name: '@@name@@',
+      version: '0.1.0',
+      description: 'TODO: 一句话说明这个插件干什么',
+      owner: 'TODO: 负责团队',
+
+      // 接受直接调用的 JSON 载荷。它是 well-known 类型，不必出现在自己的 proto 里。
+      //
+      // `description` 留空是**刻意的**，别顺手补一句话：同一个插件名在五门语言下
+      // 必须产出**完全相同**的契约。多写一句，团队换语言重写时中台就会以
+      // VERSION_CONFLICT 拒掉注册（同版本号、契约不一致），而那个报错指向的是契约层，
+      // 很难看出根源只是这里多了一句描述。（这条不一致真实发生过一次。
+      // 类型上它必填，所以写空串而不是省掉。）
+      consumes: [{ fqName: 'google.protobuf.Struct', description: '' }],
+
+      // 暴露给 agent 的能力。中台会把它聚合进统一的 MCP 工具面、加 `插件名__` 前缀
+      // （跨插件重名不冲突），声明本身也会落进契约，`get_plugin` 查得到。
+      tools: [
+        {
+          name: 'echo',
+          description: 'TODO: 这个工具干什么 —— agent 靠这句描述决定何时调用它',
+          inputSchemaJson: JSON.stringify({
+            type: 'object',
+            properties: { text: { type: 'string', description: '要回显的文本' } },
+            required: ['text'],
+          }),
+        },
+      ],
+    }
+  }
+
+  /**
+   * 本插件的 proto 编译产物，中台据此建立契约基线并做字段级兼容检查。
+   *
+   * 只用 Struct 载荷的插件没有自己的 proto，返回空即可——中台允许空 descriptor，
+   * 只要 manifest 里没声明自有类型。
+   */
+  descriptor(): Uint8Array {
+    return emptyDescriptor()
+  }
+
+  /**
+   * 数据校验规则。
+   *
+   * 中台在把数据交给 `handle` 之前**一定**先调用它；返回 `valid: false` 时链路短路，
+   * `handle` 不会被调用。规则与插件体同版本发布，因此不可能与实现漂移。
+   */
+  validate(_ctx: CallContext, env: Envelope): ValidateResponse {
+    const [payload, ok] = payloadJSON(env)
+    if (!ok) return invalid(issue('payload', '需要 JSON 对象载荷'))
+
+    const text = payload?.['text']
+    if (typeof text !== 'string' || text === '') {
+      // path 要能定位到具体字段（例如 payload.items[2].sku），中台会原样把它回给
+      // 调用方，agent 靠它改数据重试
+      return invalid(issue('payload.text', '缺少必填字段 text'))
+    }
+
+    return valid()
+  }
+
+  /**
+   * 插件体。
+   *
+   * 签名写成 `async` 是为了让你能直接 `await` 状态调用（HubState 是异步的）；
+   * 用不上状态的插件写成同步的、去掉 `async` / `Promise` 也一样。
+   */
+  async handle(ctx: CallContext, env: Envelope): Promise<Envelope> {
+    const [payload] = payloadJSON(env)
+    const text = typeof payload?.['text'] === 'string' ? (payload['text'] as string) : ''
+
+    // 信封里的 trace / deadline / subject 会被中台透传，需要时可以直接读
+    if (ctx.budgetMs < MIN_BUDGET_MS) {
+      throw new Error(`剩余预算不足（${ctx.budgetMs}ms），放弃处理`)
+    }
+
+    // ---- HubState 演示：一个跨调用的调用计数 ----
+    //
+    // 插件实例**不保证**跨调用保留内存，所以这个计数放在中台的 HubState 里：
+    // 插件重启、换副本，它都接着涨——这正是 HubState 存在的理由。
+    //
+    // 拿不到客户端时（还没注册上）整个调用照常进行，只是不带计数——这就是
+    // fail-open：状态是**增强**，不该成为调用链路上的单点。
+    // 不需要状态的插件把这一段删掉即可，别处一行都不用改。
+    let calls: number | undefined
+    if (this.state) {
+      const [raw] = await this.state.get('demo', 'calls')
+      const parsed = Number.parseInt(new TextDecoder().decode(raw ?? new Uint8Array()), 10)
+      calls = (Number.isNaN(parsed) ? 0 : parsed) + 1
+      // ttlMs 传 0 = 不过期。要过期就传毫秒（粒度是秒，不足 1 秒会被截断成 0）
+      await this.state.put('demo', 'calls', new TextEncoder().encode(String(calls)))
+    }
+
+    return withPayloadJSON(env, {
+      echo: `@@name@@ 收到: ${text}`,
+      length: text.length,
+      ...(calls === undefined ? {} : { calls }),
+    })
+  }
+}
+
+/** 构造插件。 */
+export function newPlugin(): Plugin {
+  return new EchoPlugin()
+}

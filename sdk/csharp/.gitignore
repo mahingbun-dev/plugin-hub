@@ -1,0 +1,8 @@
+# dotnet build 的产物。
+#
+# 根 .gitignore 里的 `sdk/*/bin/` 只匹配一层（`sdk/csharp/bin/`），
+# 而本 SDK 的工程在 `sdk/csharp/HubKit/` 下，产物落在两层深，它匹配不到。
+# 这些目录同时是**随包 SDK 的排除项**（见 crates/hub-templates/build.rs 的 SDK_SOURCES）：
+# 一旦被提交，它们会原样进开发者的下载包，白撑大几倍体积。
+**/bin/
+**/obj/

@@ -1,0 +1,17 @@
+# @@name@@ 的依赖。
+
+# 依赖源：内网没有私有 PyPI 镜像，用清华的公共镜像（内网可达）。
+--index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# SDK 随本工程一起下发在 @@sdk_path@@ 下，所以这里写的是**包内的相对路径**——
+# 拿到工程就能装，不必先去检出中台仓库。
+#
+# pip 解析 requirements 文件里的相对路径时，是按**本文件所在目录**展开的，
+# 所以在哪个目录下执行 `pip install -r requirements.txt` 都一样。
+#
+# 用 -e（可编辑安装）而不是普通安装：改 SDK 里的一行代码不必重装一遍。
+#
+# 工程的运行时依赖（grpcio / protobuf）由 SDK 自己的 pyproject.toml 声明，装它的
+# 时候会一并解析。**版本下限只有一个来源**——这里再抄一遍的话，抄的那份迟早会过期，
+# 而过期的表现是「本地能跑、CI 上 import 期就抛错」。
+-e @@sdk_path@@

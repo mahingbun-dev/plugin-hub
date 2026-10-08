@@ -1,0 +1,48 @@
+{
+  "name": "@example/hubkit",
+  "version": "0.1.0",
+  "private": false,
+  "description": "anc-hub 插件 SDK（Node/TypeScript）：服务端骨架、自注册、心跳、契约自检与 mock 中台",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./conformance": {
+      "types": "./src/conformance.ts",
+      "default": "./src/conformance.ts"
+    },
+    "./mockhub": {
+      "types": "./src/mockhub.ts",
+      "default": "./src/mockhub.ts"
+    },
+    "./templates/*": "./templates/*"
+  },
+  "bin": {
+    "hub-plugin": "./src/cli.ts"
+  },
+  "files": [
+    "src",
+    "proto",
+    "templates",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/proto-loader": "^0.8.0",
+    "protobufjs": "^7.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

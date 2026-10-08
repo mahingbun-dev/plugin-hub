@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <!-- xunit v3 的测试宿主是**一个可执行文件**，不是 v2 那种靠 VSTest 反射加载的库。
+         这也是它能在 .NET 10 上直接跑、且能用 Assert.Skip 的原因。 -->
+    <OutputType>Exe</OutputType>
+    <!-- 让 `dotnet test <目录/工程>` 这种**位置参数**的调用形式在 .NET 10 SDK 上也能跑：
+         缺省的 VSTest 通道会被 MTP 的 targets 以「请改用新体验」为由硬性报错，
+         这个开关把它重定向回「以可执行文件跑 MTP 测试」的路径。
+         MTP 模式（global.json 的 test.runner 段生效时）下它无害——MTP 模式不读它。 -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 只引 xunit.v3 一个包：它自带 Microsoft.Testing.Platform 的宿主与 runner。
+         再引 Microsoft.NET.Test.Sdk（VSTest 那套）反而会**直接报错**——
+         .NET 10 SDK 起，`dotnet test` 的 VSTest 通道对 MTP 项目已被移除。
+         刻意用 3.2.2（mtp-v1）而不是更新的 4.x：4.x 钉死 MTP v2，而 MTP v2 在
+         .NET 10 SDK 上把 VSTest 通道**连重定向一起移除了**——「不带 project 选项
+         的目录形式」（CI 验证门与插件团队的习惯写法）从此无解。3.x 拉进的 1.9.1
+         还留着这条重定向，两种调用形式都能跑。升 4.x 之前先把调用面收干净。 -->
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../HubKit/HubKit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 跨语言规则文件的**副本**要跟着测试走：它是 RulesTests 的输入，
+         没拷过来的话测试只能去猜仓库布局 -->
+    <None Include="../HubKit/testdata/hub-rules.json" Link="testdata/hub-rules.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

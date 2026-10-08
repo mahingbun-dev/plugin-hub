@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+
+    // 本工程的文件不编译、直接由 Node 跑（`node src/main.ts`），所以：
+    //   - noEmit：tsc 只做类型检查，产物是源码本身
+    //   - allowImportingTsExtensions：import './plugin.ts' 要带上 .ts，因为
+    //     Node 的 ESM 解析不做扩展名猜测
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+
+    // 只有**可擦除**的语法能跑：enum / namespace / 构造器参数属性都是运行时语法，
+    // Node 的类型剥离会直接报 ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX。
+    // 让 tsc 在编辑器里就把这类写法标红，而不是等运行时才发现。
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

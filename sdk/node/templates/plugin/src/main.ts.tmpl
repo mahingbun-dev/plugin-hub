@@ -1,0 +1,28 @@
+// @@name@@ —— 一个 anc-hub 插件。
+//
+// 中台与插件不要求同机；插件是独立进程，用 gRPC 与中台通信。
+// 启动时会向 HUB_ADDR 指定的中台自注册，并按中台指定的周期发心跳。
+//
+// 直接用 Node 跑（Node >= 22.18 默认剥离类型，不需要 ts-node / tsx / 构建步骤）：
+//
+//	HUB_ADDR=http://127.0.0.1:8093 \
+//	HUB_ADVERTISE_ADDR=http://127.0.0.1:9000 \
+//	npm start
+//
+// 配置全部来自环境变量：
+//   HUB_ADDR            中台插件面地址（必填）
+//   HUB_ADVERTISE_ADDR  中台可达的本插件地址（必填）
+//   HUB_LISTEN_ADDR     本插件监听地址（缺省 :9000）
+//   HUB_LOG_LEVEL       debug/info/warn/error
+import { configFromEnv, run } from '@@sdk_module@@'
+
+import { newPlugin } from './plugin.ts'
+
+try {
+  await run(newPlugin(), configFromEnv())
+} catch (err) {
+  // 走到这里说明插件**起不来**（配置缺项、manifest 非法、端口被占），
+  // 与「注册被中台拒了」是两回事——后者会一直重试并打进结构化日志
+  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
+  process.exit(1)
+}

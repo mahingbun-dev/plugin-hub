@@ -1,0 +1,28 @@
+# @@name@@ 的运行镜像。
+#
+# 插件按「独立容器」的方式部署：进程独立、用 gRPC 与中台通信、可与中台异机。
+#
+# 内网离线环境：golang 与 alpine 基础镜像需要预先导入服务器（docker load），
+# 依赖用 go mod vendor 后随源码一起提交/拷入。
+
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+
+# 先只拷依赖清单，利用层缓存：源码改动不会让依赖重下一遍
+COPY go.mod go.sum* ./
+# 离线构建时改用 vendor：go mod vendor 后把 vendor/ 一起提交，然后打开下面这行
+# RUN go mod download
+COPY . .
+
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/plugin .
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=build /out/plugin /usr/local/bin/plugin
+
+# 中台能拨通的地址由部署时经 HUB_ADVERTISE_ADDR 注入——
+# 别在镜像里写死 localhost，中台在另一台机器上时它会连不上。
+ENV HUB_LISTEN_ADDR=:9000
+EXPOSE 9000
+
+ENTRYPOINT ["plugin"]

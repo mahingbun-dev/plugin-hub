@@ -1,0 +1,6 @@
+# 本 SDK 的构建产物。
+#
+# 根目录的 .gitignore 里有 `sdk/*/target/`，但它只覆盖到这一层；
+# `protogen/target/`（维护者工具的构建缓存）比它深一级，匹配不到，所以在这里补上。
+/target/
+protogen/target/

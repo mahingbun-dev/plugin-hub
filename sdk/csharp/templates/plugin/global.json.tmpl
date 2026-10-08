@@ -1,0 +1,12 @@
+{
+  // `dotnet test` 的运行器选择。
+  //
+  // .NET 10 SDK 起，`dotnet test` 缺省走的 VSTest 通道对 Microsoft.Testing.Platform
+  // 项目**已被移除**，会直接报错。xunit v3 的测试宿主就是 MTP 的，所以必须在这里
+  // 显式选 MTP —— 否则本工程里一条测试都跑不起来。
+  //
+  // 它靠「从当前目录往上找」生效，所以必须待在工程的祖先目录里。
+  "test": {
+    "runner": "Microsoft.Testing.Platform"
+  }
+}

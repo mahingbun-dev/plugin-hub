@@ -1,0 +1,228 @@
+# @@name@@
+
+anc-hub 插件（Node / TypeScript）。
+
+## 跑起来
+
+```bash
+npm install     # 依赖走 registry.npmmirror.com（本机 npm 已指向它）
+npm test        # 含契约一致性检查（L1）
+
+HUB_ADDR=@@hub_addr@@ \
+HUB_ADVERTISE_ADDR=http://127.0.0.1:9000 \
+npm start
+```
+
+| 环境变量 | 必填 | 说明 |
+|---|---|---|
+| `HUB_ADDR` | 是 | 中台插件面地址。**本工程里填的是 `@@hub_addr@@`** |
+| `HUB_ADVERTISE_ADDR` | 是 | **中台能拨通**的本插件地址 |
+| `HUB_LISTEN_ADDR` | 否 | 本插件监听地址，缺省 `:9000` |
+| `HUB_INSTANCE_ID` | 否 | 实例标识，缺省 `主机名-PID`。**不设**与设成**空串**是一回事（都会自动生成）；只有**纯空白**才会带着一个空白 id 去注册而被拒——踩坑的是复制粘贴带上的空格 |
+| `HUB_LOG_LEVEL` | 否 | `debug` / `info` / `warn` / `error` |
+
+**没有构建步骤**：Node 22.18+ 默认剥离 TypeScript 类型，`node src/main.ts` 直接跑源码。
+代价是只能用可擦除的 TS 语法（不能用 `enum` / `namespace` / 构造器参数属性），
+`tsconfig.json` 里的 `erasableSyntaxOnly` 会提前标红。
+
+## 这个工程长什么样
+
+```
+src/main.ts         入口：读取环境变量并启动，几十行
+src/plugin.ts       插件体：manifest() / descriptor() / validate() / handle()
+test/plugin.test.ts 契约一致性测试（L1）
+sdk/                随工程下发的 SDK 源码，package.json 里以 "file:./sdk" 引用
+```
+
+`sdk/` 是**包内的相对路径**，不是发布到 registry 的包——内网没有私有 npm 源，
+带上源码，「下载一个工程」这件事才落得了地：`npm install` 会在本地把它连成一个
+可解析的依赖，不必先去检出中台仓库。
+
+## 接入四道关
+
+从「本地能跑」到「中台真的调得动」，中间有四道关，**四关全过才算接进来了**。
+坑在于每关的结论出现在**不同的地方**——最后一关的结论甚至不在命令输出里，而在日志里。
+逐条勾：
+
+- [ ] **L1 契约自洽** —— 验：`npm test` 全绿
+- [ ] **L2 运行时自检** —— 验：`node sdk/src/cli.ts conform <插件地址>` 五项全 ✓
+- [ ] **L3 中台接受注册** —— 验：**插件启动日志里出现「已注册到中台」**（这一关不看命令输出）
+- [ ] **L4 端到端调用** —— 验：`hubprobe e2e <中台地址> @@name@@ --payload '{...}'` 拿回信封
+
+> ## ⚠️ L1、L2 全绿不等于能接入
+>
+> 这两关验的都是「插件自己做得对不对」，最难的第 3 关它们**够不着**：
+>
+> - **L1 看不到你的网络地址**——它只看内存里的 manifest 对象与 proto，`HUB_ADVERTISE_ADDR`
+>   填成别人的地址它一样全绿。
+> - **L2 也验不了中台能否拨通**——L2 是**你**从本机直连插件（`http://127.0.0.1:9000`），
+>   走的是回环；中台从它那边拨不拨得到，命令里根本看不出来。
+>
+> 地址填错时 L1、L2 照样全绿，插件却在真实环境里永远接不进来。别拿这两关当交付判据。
+
+下文命令里的 `hubprobe` 是 **Go 版 SDK** 里的调试工具（本 SDK 目前只把它等价能力里
+最有用的那一项——`conform`——放进了自己的脚手架 CLI）。要用 `e2e` 那一关，请到中台
+仓库的 `sdk/go` 下 `go run ./cmd/hubprobe e2e ...`。
+
+## 照着敲：从零到接入成功
+
+```bash
+# 0) 工程已由脚手架生成，这里从装依赖开始
+npm install
+
+# 本 SDK 的调试 CLI 就在包内
+HUBKIT="node sdk/src/cli.ts"
+
+# ---------- L1 契约自洽 ----------
+npm test
+# 期望：pass 4 —— 其中「契约一致性（L1）」跑的就是中台注册期的同一套规则
+
+# ---------- L2 运行时自检 ----------
+# 另开一个终端把插件跑起来。中台不在线也能跑完这一关——conform 是直连插件的
+HUB_ADDR=@@hub_addr@@ \
+HUB_ADVERTISE_ADDR=http://127.0.0.1:9000 \
+npm start
+$HUBKIT conform http://127.0.0.1:9000
+# 期望：五项全 ✓，退出码 0
+
+# ---------- L3 中台接受注册 ----------
+# 换成真实的中台地址，以及「中台能拨通」的本插件地址，然后**看日志**
+HUB_ADDR=https://hub.example.com:8094 \
+HUB_ADVERTISE_ADDR=http://203.0.113.10:9000 \
+npm start
+# 期望：日志里出现 "msg":"已注册到中台"（JSON 一行，打到 stderr）
+#      容器里部署时用 docker logs -f <容器>
+
+# ---------- L4 端到端调用 ----------
+# 中台按登记的地址真的拨得到你，并把信封原样带回来。这一关要用 Go 版 SDK 的 hubprobe：
+#   cd <中台仓库>/sdk/go && go run ./cmd/hubprobe e2e http://127.0.0.1:8092 @@name@@ \
+#       --payload '{"text":"你好"}'
+# 打本地中台用 http://127.0.0.1:8092——8092 是**本地** HTTP 面。
+# 别写 127.0.0.1:8095：那是 UAT 主机内部的监听端口，在你机器上敲会 connection refused。
+# 地址拿不准就先 `curl <中台地址>/health`，看到 {"status":"ok",...} 就对了。
+```
+
+### L1 契约自洽
+
+- **做什么**：`manifest` / `descriptor` / `validate` / `handle` 四个方法齐全；manifest 的
+  自述（`consumes` / `produces` / `tools`）与提交的 proto 一致；工具名合法
+  （只允许字母数字与 `_-`，同一插件内不重名）；**至少声明一条契约**。
+- **怎么验**：`npm test`。工程里那个「契约一致性（L1）」用例调的是
+  `@example/hubkit/conformance` 的 `local()`，跑的就是中台注册期的同一套规则。
+  全绿时报告是这六行（顺序固定）：`manifest 存在` / `插件名合法` / `版本号存在` /
+  `descriptor 可用` / `声明的类型都在 descriptor 中`（或 `声明了契约`）/ `工具声明合法`。
+- **不过怎么办**：报什么改什么，全都是本地能改的。`✗ 声明的类型都在 descriptor 中` →
+  改 manifest 或补 proto；`✗ 声明了契约` → 加 `consumes`（直接调用的插件声明
+  `google.protobuf.Struct`）或 `produces`；工具名带 `.`、空格、中文 → 换掉。
+
+### L2 运行时自检
+
+- **做什么**：把插件真的跑起来，验 gRPC 起得来、Health / Describe 应答、校验器对空信封
+  不崩、插件体返回的确实是信封。
+- **怎么验**：`node sdk/src/cli.ts conform <插件地址>`。实测输出长这样：
+
+  ```text
+  契约一致性检查 http://127.0.0.1:9000
+    ✓ Health 可应答
+    ✓ Describe 可应答 —— @@name@@@0.1.0
+    ✓ 校验器对空信封不崩
+    ✓ 校验器可处理 JSON 载荷 —— 拒绝（1 条问题）—— 探针载荷不满足业务规则属正常
+    ✓ 插件体返回信封 —— 已返回信封
+  ```
+
+  注意「校验器可处理 JSON 载荷 —— **拒绝**」是正常结果：探针载荷本来就不满足你的业务
+  规则，只要不是超时或 panic 就算过。有任何 `✗` 时退出码为 1。
+- **不过怎么办**：
+  - **「Health 可应答」✗ 是这一关最常见的失败**，而且多半不是健康检查的问题，是**地址/端口**：
+    地址写错、端口不对（缺省监听 `:9000`）、插件没起来——三种都会落在这一行。
+  - 「插件体返回信封」✗ → `handle` 返回了 `null`，中台会把它当成插件异常。
+
+### L3 中台接受注册 —— 结论在插件启动日志里
+
+这是最反直觉的一关：**验收结果不在任何命令的输出里，只在插件自己的启动日志里。**
+成功长这样（真实运行抓的日志；插件名 / 中台地址 / 端口按你的环境替换）：
+
+```json
+{"time":"2026-09-18T15:20:48.149+08:00","level":"INFO","msg":"插件 gRPC 已监听","listen":"0.0.0.0:9000","advertise":"http://127.0.0.1:9000"}
+{"time":"2026-09-18T15:20:48.155+08:00","level":"INFO","msg":"插件已启动","hub":"@@hub_addr@@","instance":"maqb11-MAC452-5.local-83063"}
+{"time":"2026-09-18T15:20:48.190+08:00","level":"INFO","msg":"已注册到中台","plugin":"@@name@@","version":"0.1.0","instance":"maqb11-MAC452-5.local-83063"}
+```
+
+看见 `"msg":"已注册到中台"` 才算这一关过了。失败长这样——中台给的每条拒绝原因各占一行
+（`code` / `message` / `detail` 三列），最后一行收尾，说明有几条原因与多久后重试：
+
+```json
+{"time":"...","level":"ERROR","msg":"中台拒绝了注册","code":"BREAKING_CHANGE","message":"相对版本 1.0.0 存在破坏性契约变更","detail":"wms.v1.Order.sku（编号 1，类型 string）已被删除；..."}
+{"time":"...","level":"ERROR","msg":"注册未通过，稍后重试","reasons":1,"retry_in":"5s"}
+```
+
+**别只看 `code`**，它只够定位到一类问题，`detail` 才是这一条的具体出路。失败会按
+`retry_in` 一直重试（中台可能比你晚起来，这是刻意的），所以别只 `cat` 一次就下结论。
+
+| 拒绝码 | 意思 | 怎么改 |
+|---|---|---|
+| `UNREACHABLE` | 中台拨不通你自报的地址 | 几乎总是 `HUB_ADVERTISE_ADDR` 写错了 |
+| `BREAKING_CHANGE` | 新版本里删了基线字段、改了类型或字段编号 | **升版本号在这里没用**；把字段按原编号原类型改回 |
+| `VERSION_CONFLICT` | 同版本号但契约或 manifest 与库里不一致 | 版本号是制品身份，同号必须同内容 |
+| `INSTANCE_CONFLICT` | `instance_id` 为空 / 过长 / 被别的插件占用 | 换一个实例标识；纯空白也会走到这里 |
+| `MANIFEST_INVALID` / `DESCRIPTOR_INVALID` / `TOOL_CONFLICT` | 契约层问题 | L1 本该挡住——重跑 `npm test` |
+
+## 跨调用保留状态（HubState）
+
+需要跨调用保留的东西（登录缓存、去重标记、游标、限流计数）**不要**放实例内存，
+走中台的 HubState。宿主在**每次注册成功后**会把客户端注入进来，凭证不用你自己管。
+
+本工程**已经把客户端接好了**：`src/plugin.ts` 实现了 `StateAware.setState`，
+`handle` 里有一个真的在用的例子（跨调用的调用计数）。你要做的只是把它换成自己的业务。
+
+```ts
+if (this.state) {                                   // 空 = 还没注册上，fail-open
+  const [value, found] = await this.state.get('demo', 'calls')
+  //   ↑ found 区分「键不存在」与「值是空字节」
+  await this.state.put('demo', 'calls', new Uint8Array([49]), 600_000)
+  //   ↑ ttlMs 为 0 表示不过期。**粒度是秒**，不足 1 秒会被截断成 0（= 永不过期）
+  const existed = await this.state.delete('demo', 'calls')
+  const entries = await this.state.scan('demo', 'c:', 100)
+  //   ↑ prefix 传 '' = 扫整个命名空间；limit 必须在 1..=1000
+}
+```
+
+几条容易踩的：
+
+- **namespace / key / prefix 只允许 `[A-Za-z0-9_.-]`**、非空、最长 200 字节。
+  中台按凭证反查你的插件名并强制加前缀 `hub:state:{插件名}:`，你填的 namespace
+  只是**子空间**。
+- **前缀里没有版本号**：同一插件的所有版本共用一个状态空间，升版本不会清空状态，
+  但两个版本往同一个 namespace 写就是互相覆盖。
+- **上限**：单值 1MB、一次 `scan` 最多 1000 条。
+- **失败要 fail-open**：拿不到缓存就回源，别让一次状态抖动把业务调用带下水。
+  凭证失效时宿主会自己重新注册换新凭证，不用你管。
+
+本地调试时 mock 中台也实现了这一套（键名规则与真中台同源），所以不必连真中台。
+
+## 依赖与镜像
+
+第三方依赖（`@grpc/grpc-js`、`@grpc/proto-loader`、`protobufjs`）从
+`registry.npmmirror.com` 装。本机 npm 已经指向它，换机器时：
+
+```bash
+npm config set registry https://registry.npmmirror.com
+```
+
+`package.json` 里没有 lockfile 时 `npm install` 会解析最新的补丁版本；要钉死版本就提交
+一份 `package-lock.json`。
+
+## 这个 SDK 的实现选型
+
+**用 `@grpc/proto-loader` 在运行时加载 `.proto`，而不是静态生成代码。** 三条理由：
+
+1. **契约原文进仓库**：`sdk/proto/hub/v1/*.proto` 与中台仓库 `crates/hub-proto/proto/hub/v1/`
+   逐字相同，中台改契约时 diff 一眼可见；静态生成的话，产物是几千行看不懂的代码，
+   契约漂移要靠人比对生成物。
+2. **开发者不需要装 protoc**：本 SDK 只做运行时加载，`.proto` 与 well-known 类型
+   （`google/protobuf/any.proto`、`struct.proto`）都随包下发，离线环境也能跑。
+3. **生成产物体积与可审性**：一份 `pbjs -t static-module` 的产物比这四份 `.proto`
+   加起来还大一个数量级，而它没有一行是人读得懂的。
+
+代价是**没有静态生成的消息类型**。SDK 用 `src/types.ts` 手写了一份接口来补
+（字段名与 proto-loader 的 `keepCase: false` 一致），插件作者因此仍有补全与类型检查。

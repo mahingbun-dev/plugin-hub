@@ -1,0 +1,12 @@
+[package]
+name = "hub-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+prost = "0.14.4"
+prost-types = "0.14.4"
+thiserror = "2.0.20"

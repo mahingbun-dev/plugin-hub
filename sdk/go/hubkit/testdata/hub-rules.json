@@ -1,0 +1,69 @@
+{
+  "_comment": "HubState 键规则与插件名规则的跨语言契约。两侧实现（Rust 的 valid_segment / is_valid_plugin_name，Go 的 hubkit.ValidStateSegment / ValidPluginName）都必须符合本文件的 cases。改规则时先改这里，再让两侧通过。",
+  "_why_handwritten": "cases 是手写的规格声明，不由任何一侧的实现生成——由实现生成等于自证：生成时用了错的实现，固件也是错的。",
+  "_byte_vs_char": "两条规则都只允许 ASCII，所以合法输入的长度必然等于字符数；非法输入无论先撞长度上限还是先撞字符集，结果都是 false，两种实现风格（按字节 / 按字符）的差别不可观测。因此不需要专门区分字节与字符的用例。",
+  "_action_differs": "判定合一，动作不合并：中台与 mockhub 拿判定去拒绝请求，auth 插件拿它去跳过缓存（fail-open）。",
+  "stateTokenMetadata": "x-hub-state-token",
+  "gateway": {
+    "callChainMeta": "hub.call_chain",
+    "maxInvokeDepth": 8,
+    "invokeQuotaKeyPrefix": "hub:invoke_quota",
+    "invokeQuotaPerMinute": 60,
+    "note": "插件互调的事实源：Rust（hub_grpc::gateway 常量）与各语言 SDK 都对这份文件对齐——链随 meta 传递、深度含本次 caller、配额按插件每分钟固定窗口记账。"
+  },
+  "rules": {
+    "stateSegment": {
+      "maxBytes": 200,
+      "minBytes": 1,
+      "allowedChars": "A-Za-z0-9_.-",
+      "appliesTo": ["KvKey.namespace", "KvKey.key", "KvScanRequest.prefix"],
+      "note": "放行 * 是漏洞不是功能：前缀靠字符串拼接，通配符会让 KvScan 变成跨命名空间的模式匹配。冒号同理——它破坏前缀的结构。"
+    },
+    "pluginName": {
+      "maxBytes": 64,
+      "minBytes": 1,
+      "allowedChars": "A-Za-z0-9_-",
+      "firstCharAllowedChars": "A-Za-z0-9",
+      "note": "首字符不允许 - 与 _，其余位置允许。"
+    }
+  },
+  "cases": [
+    { "rule": "stateSegment", "input": "", "valid": false },
+    { "rule": "stateSegment", "input": "s", "valid": true },
+    { "rule": "stateSegment", "input": "A1", "valid": true },
+    { "rule": "stateSegment", "input": "_", "valid": true },
+    { "rule": "stateSegment", "input": "-", "valid": true },
+    { "rule": "stateSegment", "input": ".", "valid": true },
+    { "rule": "stateSegment", "input": "a.b-c_1", "valid": true },
+    { "rule": "stateSegment", "input": "scan", "valid": true },
+    { "rule": "stateSegment", "input": "*", "valid": false },
+    { "rule": "stateSegment", "input": "a*", "valid": false },
+    { "rule": "stateSegment", "input": "a:b", "valid": false },
+    { "rule": "stateSegment", "input": "a b", "valid": false },
+    { "rule": "stateSegment", "input": "a/b", "valid": false },
+    { "rule": "stateSegment", "input": "a@b", "valid": false },
+    { "rule": "stateSegment", "input": "maqb11@example.com", "valid": false },
+    { "rule": "stateSegment", "input": "a\u0000b", "valid": false },
+    { "rule": "stateSegment", "input": "中文", "valid": false },
+    { "rule": "stateSegment", "input": "a中", "valid": false },
+    { "rule": "stateSegment", "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "valid": true },
+    { "rule": "stateSegment", "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "valid": false },
+    { "rule": "stateSegment", "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-", "valid": true },
+    { "rule": "pluginName", "input": "", "valid": false },
+    { "rule": "pluginName", "input": "a", "valid": true },
+    { "rule": "pluginName", "input": "1", "valid": true },
+    { "rule": "pluginName", "input": "A1", "valid": true },
+    { "rule": "pluginName", "input": "good-plugin", "valid": true },
+    { "rule": "pluginName", "input": "a_b-1", "valid": true },
+    { "rule": "pluginName", "input": "a-", "valid": true },
+    { "rule": "pluginName", "input": "_lead", "valid": false },
+    { "rule": "pluginName", "input": "-lead", "valid": false },
+    { "rule": "pluginName", "input": ".lead", "valid": false },
+    { "rule": "pluginName", "input": "a.b", "valid": false },
+    { "rule": "pluginName", "input": "has space", "valid": false },
+    { "rule": "pluginName", "input": "中文名", "valid": false },
+    { "rule": "pluginName", "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "valid": true },
+    { "rule": "pluginName", "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "valid": false },
+    { "rule": "pluginName", "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-", "valid": true }
+  ]
+}

@@ -1,0 +1,70 @@
+package main
+
+import (
+	"context"
+	"testing"
+
+	"@@sdk_module@@/conformance"
+	"@@sdk_module@@/hubkit"
+	"@@sdk_module@@/proto/hubv1"
+)
+
+// TestConformance 跑契约一致性检查。
+//
+// 中台在注册时会做同样的检查，本地先跑能省一轮「推上去才发现被拒」。
+func TestConformance(t *testing.T) {
+	if report := conformance.Local(NewPlugin()); !report.Passed() {
+		t.Fatalf("契约一致性未通过:\n%s", report)
+	}
+}
+
+func TestValidate拒绝缺少必填字段的载荷(t *testing.T) {
+	env, err := hubkit.WithPayloadJSON(&hubv1.Envelope{MessageId: "t-1"}, map[string]any{})
+	if err != nil {
+		t.Fatalf("构造载荷失败: %v", err)
+	}
+
+	resp, err := NewPlugin().Validate(context.Background(), env)
+	if err != nil {
+		t.Fatalf("校验器报错: %v", err)
+	}
+	if resp.GetValid() {
+		t.Fatal("缺少 text 应被拒绝")
+	}
+	if got := resp.GetIssues()[0].GetPath(); got != "payload.text" {
+		t.Errorf("问题应定位到 payload.text，实际 %q", got)
+	}
+}
+
+func TestHandle回显载荷(t *testing.T) {
+	env, err := hubkit.WithPayloadJSON(&hubv1.Envelope{MessageId: "t-2"}, map[string]any{"text": "你好"})
+	if err != nil {
+		t.Fatalf("构造载荷失败: %v", err)
+	}
+
+	out, err := NewPlugin().Handle(context.Background(), env)
+	if err != nil {
+		t.Fatalf("处理失败: %v", err)
+	}
+
+	payload, ok := hubkit.PayloadJSON(out)
+	if !ok {
+		t.Fatal("输出应是 JSON 载荷")
+	}
+	if payload["echo"] != "@@name@@ 收到: 你好" {
+		t.Errorf("echo = %v", payload["echo"])
+	}
+}
+
+func TestHandle在预算不足时提前放弃(t *testing.T) {
+	env, err := hubkit.WithPayloadJSON(&hubv1.Envelope{}, map[string]any{"text": "x"})
+	if err != nil {
+		t.Fatalf("构造载荷失败: %v", err)
+	}
+	// 截止时间设在过去
+	env.DeadlineMs = 1
+
+	if _, err := NewPlugin().Handle(context.Background(), env); err == nil {
+		t.Fatal("预算不足时应提前放弃，而不是硬着头皮做完")
+	}
+}

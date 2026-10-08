@@ -1,0 +1,76 @@
+using @@package@@;
+using Hub.V1;
+using @@sdk_module@@;
+using Xunit;
+
+namespace @@package@@.Tests;
+
+/// <summary>
+/// L1 契约一致性。**别删它**——它是 L1 的全部内容。
+///
+/// 它跑的就是中台注册期的同一套校验规则（<see cref="Conformance.Local"/> 与
+/// crates/hub-registry/src/validate.rs 对应），本地先跑一遍，省一轮
+/// 「推上去才发现被拒」。
+///
+/// ⚠️ 「它全绿」不等于「接进来了」。L1 只看内存里的 manifest 与 proto，
+/// **看不到你的网络地址**——HUB_ADVERTISE_ADDR 填成别人的地址它一样全绿。
+/// 真正的分水岭是 L3：中台接受注册。见 README 的「接入四道关」。
+/// </summary>
+public class ContractTests
+{
+    [Fact]
+    public void 契约一致性()
+    {
+        var report = Conformance.Local(new Plugin());
+        Assert.True(report.Passed, report.ToString());
+    }
+
+    [Fact]
+    public async Task Validate拒绝缺少必填字段的载荷()
+    {
+        var envelope = Envelopes.WithPayloadJson(new Envelope { MessageId = "t-1" }, new Dictionary<string, object?>());
+
+        var response = await new Plugin().ValidateAsync(envelope, TestContext.Current.CancellationToken);
+
+        Assert.False(response.Valid);
+        Assert.Equal("payload.text", response.Issues[0].Path);
+    }
+
+    [Fact]
+    public async Task Validate拒绝非JSON载荷()
+    {
+        // 空信封必须能处理，而不是抛异常——中台在探测时就会送它进来
+        var response = await new Plugin().ValidateAsync(new Envelope(), TestContext.Current.CancellationToken);
+
+        Assert.False(response.Valid);
+        Assert.Equal("payload", response.Issues[0].Path);
+    }
+
+    [Fact]
+    public async Task Handle回显载荷()
+    {
+        var envelope = Envelopes.WithPayloadJson(new Envelope { MessageId = "t-2" }, new Dictionary<string, object?>
+        {
+            ["text"] = "你好",
+        });
+
+        var output = await new Plugin().HandleAsync(envelope, TestContext.Current.CancellationToken);
+        var payload = Envelopes.PayloadJson(output);
+
+        Assert.NotNull(payload);
+        Assert.Equal("@@name@@ 收到: 你好", payload!["echo"]);
+        // 「你好」是 2 个字符、6 个字节。载荷是按字节编码的，这里也按字节数——
+        // 按字符数算的话，两侧的数字迟早要对一遍
+        Assert.Equal(6d, payload["length"]);
+    }
+
+    [Fact]
+    public async Task Handle在预算不足时提前放弃()
+    {
+        var envelope = Envelopes.WithPayloadJson(new Envelope(), new Dictionary<string, object?> { ["text"] = "x" });
+        envelope.DeadlineMs = 1; // 截止时间设在过去
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new Plugin().HandleAsync(envelope, TestContext.Current.CancellationToken));
+    }
+}

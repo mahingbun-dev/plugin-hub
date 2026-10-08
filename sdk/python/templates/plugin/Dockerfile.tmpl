@@ -1,0 +1,30 @@
+# @@name@@ 的运行镜像。
+#
+# 插件按「独立容器」的方式部署：进程独立、用 gRPC 与中台通信、可与中台异机。
+#
+# 内网离线环境：python 基础镜像需要预先导入服务器（docker load），
+# 第三方依赖（grpcio / protobuf，及构建期的 setuptools）需要能访问 PyPI 镜像。
+# 完全离线时改用 pip download 把 wheel 拉下来随构建上下文一起拷入，
+# 再把下面那条 pip install 换成从本地目录装。
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 先只拷依赖清单和 SDK，利用层缓存：业务代码改动不会让依赖重下一遍
+COPY requirements.txt ./
+COPY sdk ./sdk
+# 离线构建时把 --index-url 那行从 requirements.txt 里去掉，改指本地的 wheel 目录
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY plugin.py main.py ./
+
+ENV PYTHONUNBUFFERED=1
+# 中台能拨通的地址由部署时经 HUB_ADVERTISE_ADDR 注入——
+# 别在镜像里写死 localhost，中台在另一台机器上时它会连不上。
+ENV HUB_LISTEN_ADDR=:9000
+EXPOSE 9000
+
+# 用 exec 形式而不是 `python main.py` 的 shell 形式：shell 形式下 PID 1 是 sh，
+# SIGTERM 送不到 python 进程上，优雅注销那条路就走不到了。
+ENTRYPOINT ["python", "main.py"]

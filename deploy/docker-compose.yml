@@ -1,0 +1,80 @@
+# anc-hub 本地/单机编排：PostgreSQL + Redis + 中台。
+#
+# 用法：
+#   cp deploy/.env.example .env      # 至少填 PG_PASSWORD / REDIS_PASSWORD
+#   docker compose -p anc-hub -f deploy/docker-compose.yml --env-file .env up -d
+#
+# 设计要点：
+#   - 依赖**自带**（PG 与 Redis 由本编排提供），端口刻意避开默认值，
+#     避免与同机其它服务相争，也一眼看得出归谁。
+#   - 数据绑宿主机目录而非 named volume：出问题时直接可见、可用 pg_dump 冷备。
+#   - 连接串由 compose 从分量拼出，密码只在 .env 写一处。
+#   - 中台网络模式用 host：插件可能部署在其他主机上，经 nginx grpc_pass
+#     转发进来时，中台要在宿主机网络上可达（端口映射在 gRPC 场景下不可靠）。
+#     纯本机试跑可改成 bridge + ports 映射。
+
+services:
+  pg:
+    image: postgres:16-alpine
+    container_name: anc-hub-pg
+    environment:
+      POSTGRES_USER: ${PG_USER:?请在 .env 配置 PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?请在 .env 配置 PG_PASSWORD（openssl rand -hex 24，纯字母数字）}
+      POSTGRES_DB: ${PG_DB:-anc_hub}
+    ports:
+      - "${PG_PORT:-55432}:5432"
+    volumes:
+      - ${PG_DATA_DIR:-./data/pg}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DB:-anc_hub}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: anc-hub-redis
+    # 只监听容器内所有接口的 6379；对外由端口映射决定，密码必须配
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?请在 .env 配置 REDIS_PASSWORD（openssl rand -hex 24）}"]
+    ports:
+      - "${REDIS_PORT:-56380}:6379"
+    volumes:
+      - ${REDIS_DATA_DIR:-./data/redis}:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  hub:
+    image: anc-hub:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: anc-hub
+    # host 网络：HTTP 面只绑 127.0.0.1（经 nginx 对外），插件面绑全网卡。
+    network_mode: host
+    depends_on:
+      pg:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 连接串由分量拼出：密码只此一处，不会出现「改了 PG_PASSWORD
+      # 却忘了同步连接串」的漂移。
+      DATABASE_URL: postgresql://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_PORT:-55432}/${PG_DB:-anc_hub}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@127.0.0.1:${REDIS_PORT:-56380}/2
+      HUB_HTTP_HOST: ${HUB_HTTP_HOST:-127.0.0.1}
+      HUB_HTTP_PORT: ${HUB_HTTP_PORT:-8095}
+      HUB_GRPC_HOST: ${HUB_GRPC_HOST:-0.0.0.0}
+      HUB_GRPC_PORT: ${HUB_GRPC_PORT:-8093}
+      HUB_OPS_SOCKET: ${HUB_OPS_SOCKET:-/run/anc-hub/ops.sock}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # 经 nginx 对外提供 MCP 时必须配置（逗号分隔白名单；一旦配置即替换默认回环放行）
+      HUB_MCP_ALLOWED_HOSTS: ${HUB_MCP_ALLOWED_HOSTS:-}
+      # 跨机插件的可达地址（自报给中台），形如 https://hub.example.com:8094
+      HUB_PLUGIN_PUBLIC_ADDR: ${HUB_PLUGIN_PUBLIC_ADDR:-}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+    restart: unless-stopped

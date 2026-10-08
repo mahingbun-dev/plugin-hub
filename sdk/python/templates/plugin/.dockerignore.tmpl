@@ -1,0 +1,20 @@
+# 本地构建产物不进**构建上下文**。
+#
+# **必须有这个文件**：Docker 只认 .dockerignore，**不认 .gitignore**。而构建上下文是
+# 「整个目录都会先发给 dockerd」——哪怕本 Dockerfile 只 COPY 了 `requirements.txt` /
+# `plugin.py` / `main.py` 三个文件，一个本地建的 `.venv/`（几百 MB）照样会被推过去。
+#
+# 这一条与 README 的「快速开始」是配套的：那份文档让人先在本地建虚拟环境装依赖、
+# 跑一遍测试，于是 `.venv/` 就存在了。没有这个文件，之后每次 `docker build` 都要
+# 白传一遍它。
+.venv/
+venv/
+
+# Python 的字节码与打包元数据
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 本地环境变量（中台地址等），与 .gitignore 同一个理由
+.env

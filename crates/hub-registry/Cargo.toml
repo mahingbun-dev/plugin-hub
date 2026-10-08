@@ -1,0 +1,22 @@
+[package]
+name = "hub-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hub-proto = { path = "../hub-proto" }
+hub-contract = { path = "../hub-contract" }
+hub-store = { path = "../hub-store" }
+async-trait = "0.1.92"
+prost = "0.14.4"
+tracing = "0.1.44"
+chrono = "0.4.45"
+thiserror = "2.0.20"
+
+[dev-dependencies]
+prost-types = "0.14.4"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "migrate", "macros"] }
+tokio = { version = "1.53.1", features = ["rt", "macros", "time"] }

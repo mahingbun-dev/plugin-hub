@@ -1,0 +1,36 @@
+# @@name@@ 的运行镜像。
+#
+# 插件按「独立容器」的方式部署：进程独立、用 gRPC 与中台通信、可与中台异机。
+#
+# 内网离线环境的两个前置：
+#   1. 基础镜像要预先导入服务器（docker load）：
+#        dotnet/sdk:10.0 与 dotnet/aspnet:10.0
+#   2. NuGet 包要预先备好。第一次构建会在 restore 阶段取包，之后从
+#      ~/.nuget/packages 命中缓存。**离线构建**建议在联网机器上先
+#      `dotnet restore` 一次，再把缓存的 packages 目录拷进构建上下文；
+#      本 Dockerfile 不替你决定用哪种（私有 feed / 挂载缓存 / 拷缓存目录），
+#      那取决于你们团队的供应链。
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# 先只拷依赖清单与 SDK，利用层缓存：业务代码改动不会让依赖重下一遍
+COPY sdk/ ./sdk/
+COPY Plugin.csproj global.json ./
+RUN dotnet restore Plugin.csproj
+
+COPY . .
+RUN dotnet publish Plugin.csproj -c Release -o /out --no-restore
+
+# 运行镜像必须是 **aspnet** 而不是 runtime：插件用 Kestrel 托 gRPC 服务，
+# 框架引用里带着 Microsoft.AspNetCore.App
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=build /out/ ./
+
+# 中台能拨通的地址由部署时经 HUB_ADVERTISE_ADDR 注入——
+# 别在镜像里写死 localhost，中台在另一台机器上时它会连不上。
+ENV HUB_LISTEN_ADDR=:9000
+EXPOSE 9000
+
+ENTRYPOINT ["dotnet", "@@package@@.dll"]

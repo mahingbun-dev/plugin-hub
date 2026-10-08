@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package hub.v1;
+
+option go_package = "github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1";
+
+import "hub/v1/envelope.proto";
+import "hub/v1/plugin.proto";
+
+// 插件 → 中台：发现与互调。
+//
+// 插件之间不直连：直连会绕过中台的治理、审计、熔断与身份体系，与中台定位冲突。
+// 同步互调一律经中台代调（A→hub→B），下游复用与 flow 执行同一条
+// Invoker / Governor / 审计全链路；发现能力（清单 / 消息端点 / 契约）也只从中台取。
+//
+// 与 Publish（异步触发 flow，拿不到结果）的分工：需要下游处理结果的同步场景走 Invoke。
+//
+// **身份与 Publish 同强度**：每个 RPC 都凭 metadata `x-hub-state-token` 反查调用方
+// 插件身份，subject 由中台无条件覆盖为调用方——请求信封里自报的 subject 不可信。
+//
+// **结果语义**：业务层结果（下游拒绝、未授权、超限、成环…）一律走响应字段
+// （outcome + reason / issues），只有基础设施故障（未鉴权、下游不可达、内部错误）
+// 才返回 gRPC Status——SDK 据此抛类型化异常，调用方不必解析错误字符串。
+service PluginGateway {
+  // 在线插件清单。插件用它找「能调谁」，不必旁路维护硬编码名单
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+
+  // 消息类型 → 生产者 / 消费者。按消息反查上下游，发现可订阅或可调用的数据流
+  rpc DescribeMessage(DescribeMessageRequest) returns (DescribeMessageResponse);
+
+  // 插件契约 + 字段级 schema。调别人之前先看它吃什么、吐什么
+  rpc GetContract(GetContractRequest) returns (GetContractResponse);
+
+  // 同步互调 A→hub→B。中台负责鉴权、配额、防环、subject 覆盖与 deadline 夹紧
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+}
+
+message ListPluginsRequest {
+  // 缺省只列在线（有健康实例）的插件；置 true 时附上离线插件
+  bool include_offline = 1;
+}
+
+message PluginSummary {
+  string name = 1;
+
+  // 已注册的最新版本。多版本共存时在线的不一定是它
+  string latest_version = 2;
+
+  bool online = 3;
+
+  // 当前健康实例数
+  uint32 instance_count = 4;
+
+  string description = 5;
+}
+
+message ListPluginsResponse {
+  repeated PluginSummary plugins = 1;
+}
+
+message DescribeMessageRequest {
+  // 全限定消息名，与 MessageContract.fq_name 同口径（如 `wms.v1.OrderCreated`）
+  string fq_name = 1;
+}
+
+message MessageEndpoint {
+  // 生产 / 消费该消息的插件及其版本
+  string plugin = 1;
+  string version = 2;
+}
+
+message DescribeMessageResponse {
+  // 生产者来自 manifest.produces，消费者来自 manifest.consumes
+  repeated MessageEndpoint producers = 1;
+  repeated MessageEndpoint consumers = 2;
+}
+
+message GetContractRequest {
+  string plugin = 1;
+
+  // 可空：空 = 取最新已注册版本
+  string version = 2;
+
+  // 可空：空 = 不展开单个消息的字段级 schema（只要整份契约）
+  string fq_name = 3;
+}
+
+message GetContractResponse {
+  string name = 1;
+  string version = 2;
+
+  // 复用 plugin.proto 的消息契约
+  repeated MessageContract produces = 3;
+  repeated MessageContract consumes = 4;
+
+  // 本插件声明可调用的目标插件名（语义同 PluginManifest.invokes）
+  repeated string invokes = 5;
+
+  // 复用 plugin.proto 的工具声明
+  repeated ToolDecl tools = 6;
+
+  // fq_name 非空时：该消息的字段级 schema（JSON，由注册的 descriptor 摊平）；否则为空
+  string schema_json = 7;
+}
+
+message InvokeRequest {
+  // 目标插件名
+  string plugin = 1;
+
+  // 可空 = 目标最新版本
+  string version = 2;
+
+  // 调用方构造的信封：message_id / type / payload / deadline_ms 必填。
+  // subject 会被中台无条件覆盖为调用方，填了也没用。
+  // Envelope.meta 是唯一自由携带通道：`hub.call_chain`（复制自调用方收到的信封）
+  // 等经它传递，中台据此防互调成环。
+  Envelope envelope = 3;
+
+  // 本次调用的超时预算。实际 deadline = min(传入 deadline_ms, now + timeout_ms)：
+  // 既不允许顶掉更早的整体 deadline，也不会比它更晚
+  uint32 timeout_ms = 4;
+}
+
+// 业务结果分类。基础设施故障不走这里——那会直接返回 gRPC Status。
+enum InvokeOutcome {
+  INVOKE_OUTCOME_UNSPECIFIED = 0;
+
+  // 下游 Handle 成功，envelope 即其返回信封
+  HANDLED = 1;
+
+  // 下游 Validate 拒绝，issues 为结构化校验问题
+  REJECTED = 2;
+
+  // 未授权 / 超限 / 成环 / 链深超限 / 下游出错等，reason 说明原因
+  ERROR = 3;
+}
+
+message InvokeResponse {
+  InvokeOutcome outcome = 1;
+
+  // 仅 HANDLED 时有值：下游 Handle 返回的信封
+  Envelope envelope = 2;
+
+  // 仅 REJECTED 时有值：目标插件 Validate 的 issues（复用 plugin.proto）
+  repeated ValidationIssue issues = 3;
+
+  // ERROR / REJECTED 的人类可读原因
+  string reason = 4;
+
+  // 中台侧整备 + 下游处理的总耗时
+  uint64 elapsed_ms = 5;
+}

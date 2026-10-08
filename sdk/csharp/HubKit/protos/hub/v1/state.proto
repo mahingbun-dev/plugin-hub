@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package hub.v1;
+
+option go_package = "github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1";
+
+import "hub/v1/envelope.proto";
+
+// 插件 → 中台：外置状态 API。
+//
+// 插件被**强制无状态**——实例内存不保证跨调用保留，因此热切换零代价、
+// 水平扩展无障碍、重放与测试都简单。所有需要跨调用保留的东西都走这里。
+//
+// 中台按**注册时下发的凭证**反查插件名并强制加前缀 `hub:state:{插件名}:`——前缀取自
+// 凭证而非插件自报的字段，插件自报的 namespace 只作为子空间拼在后面。
+//
+// **但这不是插件间的隔离承诺**：凭证只证明注册方自称是某个插件名、并通过了该名字的
+// 注册校验，不证明它就是那个插件。插件面按设计不鉴权，任何能连上该端口的进程都能注册
+// 一个与目标插件契约兼容的新版本、拿到反查为该插件的凭证并读写它的状态空间。
+// 隔离强度与完整边界见 `docs/design.md` 风险 11。
+//
+// **租户维度本期未实现**：HubState 请求只有 KvKey，没有 Envelope 上下文，
+// 协议上推导不出"当前租户"，而插件自报的租户不可信。多租户需求出现时再单独设计。
+service HubState {
+  rpc KvGet(KvGetRequest) returns (KvGetResponse);
+  rpc KvPut(KvPutRequest) returns (KvPutResponse);
+  rpc KvDelete(KvDeleteRequest) returns (KvDeleteResponse);
+  rpc KvScan(KvScanRequest) returns (KvScanResponse);
+
+  // 触发下游：把一条 Envelope 投给目标 flow。
+  // 中台负责防环与限流，防止插件互相触发形成风暴。
+  rpc Publish(PublishRequest) returns (PublishResponse);
+}
+
+message KvKey {
+  // 命名空间。中台会强制加上插件前缀（租户维度本期未实现，见文件头注释），
+  // 插件填自己的业务子空间即可。
+  //
+  // **只允许 [A-Za-z0-9_.-]，非空，最长 200 字节**。放行 `*` 是漏洞不是功能：
+  // 前缀靠字符串拼接，通配符会让 KvScan 变成跨命名空间的模式匹配。冒号同理。
+  // 规则的事实来源是 sdk/go/hubkit/testdata/hub-rules.json，Rust 与 Go 两侧的
+  // 实现由契约测试钉住（crates/hub-grpc/tests/state_rules.rs 与
+  // sdk/go/hubkit/rules_test.go 读的是同一份文件）。
+  string namespace = 1;
+
+  // 键名。字符集与长度约束同 namespace。
+  string key = 2;
+}
+
+message KvGetRequest {
+  KvKey key = 1;
+}
+
+message KvGetResponse {
+  bool found = 1;
+  bytes value = 2;
+}
+
+message KvPutRequest {
+  KvKey key = 1;
+  bytes value = 2;
+
+  // 0 表示不过期
+  int64 ttl_seconds = 3;
+}
+
+message KvPutResponse {}
+
+message KvDeleteRequest {
+  KvKey key = 1;
+}
+
+message KvDeleteResponse {
+  bool deleted = 1;
+}
+
+message KvScanRequest {
+  string namespace = 1;
+
+  // 前缀。允许为空（表示扫整个命名空间）；非空时字符集同 namespace。
+  string prefix = 2;
+
+  // 上限，防止插件一次拉走整个命名空间
+  uint32 limit = 3;
+}
+
+message KvScanResponse {
+  repeated KvEntry entries = 1;
+}
+
+message KvEntry {
+  string key = 1;
+  bytes value = 2;
+}
+
+message PublishRequest {
+  // 目标 flow 名或订阅 topic
+  string target = 1;
+
+  // 待投递的信封。其中 subject 由中台按调用方（插件）身份覆盖，
+  // 插件不能借此外冒用他人身份。
+  Envelope envelope = 2;
+}
+
+message PublishResponse {
+  bool accepted = 1;
+
+  // 受理后产生的执行 id，供后续查链路
+  string run_id = 2;
+
+  // 被拒绝时的原因（例如检测到环）
+  string reason = 3;
+}

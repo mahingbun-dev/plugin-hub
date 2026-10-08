@@ -1,0 +1,16 @@
+[package]
+name = "hub-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hub-proto = { path = "../hub-proto" }
+prost = "0.14.4"
+prost-types = "0.14.4"
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt", "macros", "net", "sync", "time"] }
+tokio-stream = { version = "0.1.19", features = ["net"] }
+tonic = { version = "0.14.6", features = ["transport", "codegen", "server"] }

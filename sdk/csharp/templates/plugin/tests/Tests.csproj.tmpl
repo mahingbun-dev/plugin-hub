@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- xunit v3 的测试宿主是**一个可执行文件**，不是 v2 那种靠 VSTest 反射加载的库 -->
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>@@package@@.Tests</RootNamespace>
+    <AssemblyName>@@package@@.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 只引 xunit.v3 一个包：它自带 Microsoft.Testing.Platform 的宿主与 runner。
+         再引 Microsoft.NET.Test.Sdk（VSTest 那套）反而会**直接报错**——
+         .NET 10 SDK 起，`dotnet test` 的 VSTest 通道对 MTP 项目已被移除。 -->
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Plugin.csproj" />
+  </ItemGroup>
+
+</Project>

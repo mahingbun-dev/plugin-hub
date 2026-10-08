@@ -1,0 +1,39 @@
+[package]
+name = "hub-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hub-core = { path = "../hub-core" }
+axum = "0.8.9"
+# 只用 install_recorder() + render()：不开 http-listener / push-gateway，
+# 否则会拉进 rustls + aws-lc-sys（需要 cmake 与 C 编译链），离线构建镜像会变重。
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+hub-store = { version = "0.1.0", path = "../hub-store" }
+hub-registry = { version = "0.1.0", path = "../hub-registry" }
+hub-engine = { version = "0.1.0", path = "../hub-engine" }
+hub-proto = { version = "0.1.0", path = "../hub-proto" }
+serde_json = "1.0.151"
+chrono = "0.4.45"
+ulid = "3.0.0"
+base64 = "0.23.1"
+hub-flow = { version = "0.1.0", path = "../hub-flow" }
+hub-bus = { version = "0.1.0", path = "../hub-bus" }
+hub-templates = { version = "0.1.0", path = "../hub-templates" }
+prost-types = "0.14.4"
+tracing = "0.1.44"
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+hub-observe = { path = "../hub-observe" }
+hub-plugin-client = { path = "../hub-plugin-client" }
+hub-store = { path = "../hub-store" }
+hub-testkit = { path = "../hub-testkit" }
+serde_json = "1.0.151"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "migrate", "macros"] }
+tokio = { version = "1.53.1", features = ["rt", "macros", "rt-multi-thread", "net", "time"] }
+tower = { version = "0.5.3", features = ["util"] }

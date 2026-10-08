@@ -1,0 +1,26 @@
+"""@@name@@ 的入口。
+
+启动后会向 ``HUB_ADDR`` 指定的中台自注册，并按中台指定的周期发心跳；
+收到 SIGTERM / SIGINT 时向中台注销，然后退出。
+"""
+
+from __future__ import annotations
+
+import hubkit
+
+# 插件体在同目录的 plugin.py 里
+import plugin
+
+
+def main() -> None:
+    # 配置全部来自环境变量：
+    #   HUB_ADDR            中台插件面地址（必填）
+    #   HUB_ADVERTISE_ADDR  中台可达的本插件地址（必填）
+    #   HUB_LISTEN_ADDR     本插件监听地址（缺省 :9000）
+    #   HUB_INSTANCE_ID     实例标识（缺省 主机名-PID）
+    #   HUB_LOG_LEVEL       debug/info/warn/error
+    hubkit.run(plugin.Plugin(), hubkit.config_from_env())
+
+
+if __name__ == "__main__":
+    main()

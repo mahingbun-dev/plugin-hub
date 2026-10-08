@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <!-- 命名空间与程序集名都取自脚手架给的 @@package@@。
+         注意它是**一个 C# 命名空间**（如 OrderReader），不是 Go 那种反向域名路径——
+         待会儿 `@@sdk_module@@` 也是按命名空间引用的。 -->
+    <RootNamespace>@@package@@</RootNamespace>
+    <AssemblyName>@@package@@</AssemblyName>
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- 骨架里的公开成员不写 XML 注释是正常的，别让它刷满屏 -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SDK 随本工程一起下发在 @@sdk_path@@ 下，所以这里就是**包内的相对路径**——
+         拿到工程就能编，不必先去检出中台仓库，也不必改这一行。
+         @@sdk_module@@ 是它对外暴露的命名空间（代码里 `using @@sdk_module@@;`）。 -->
+    <ProjectReference Include="@@sdk_path@@/HubKit/HubKit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 本工程在目录根的默认通配是 `**/*.cs`，会把下面两棵子树一起吸进来：
+           - tests/ ：测试工程，被编进来就把测试依赖也拖进运行镜像
+           - sdk/   ：随包下发的 SDK 源码，里面有 **SDK 自己的**测试工程
+                      （HubKit.Tests），引的 xunit 在本工程里根本不存在
+         .NET 缺省只排除**本工程**的 bin/obj，`sdk/HubKit.Tests/obj/` 那些生成文件
+         不在此列——所以只排 tests/ 是不够的，实测会报出一百多个 CS0246。 -->
+    <Compile Remove="tests/**;sdk/**" />
+  </ItemGroup>
+
+  <!-- @@package@@ 必须是**一个 C# 命名空间**（如 OrderReader），不是 Go 那种反向域名路径。
+       填成 `example.com/order-reader` 的话，`/` 会直接落进 namespace 与 AssemblyName，
+       报出来的是一屏语法错误（CS1514/CS0116/CS1002…），看不出根因是「命名空间写错了」。
+
+       **判据是「整个字符串是不是合法命名空间」，不是「有没有某几个字符」**：
+       第一版只拦了 `/`、`\`、空格，于是**包名留空时**（页面与 hub-scaffold 都缺省取插件名）
+       插件名里的 `-` 原样进去了——`namespace order-reader;` 编译报 6 个错，而守卫一声不响。
+       数字开头（`1reader`）同理。用一条正则把它们一并挡住。 -->
+  <Target Name="ValidatePackageName" BeforeTargets="BeforeBuild">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch($(AssemblyName), '^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$'))"
+           Text="@@package@@ 不是合法的 C# 命名空间：它得是像 OrderReader 或 Acme.OrderReader 这样的标识符（字母或下划线开头，各段只含字母、数字、下划线），不能含 / \ - 空格，也不能以数字开头。注意**留空时取的是插件名**，而插件名带连字符很常见——那种情况请在这里显式填一个命名空间。" />
+  </Target>
+
+</Project>

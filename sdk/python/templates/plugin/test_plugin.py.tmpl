@@ -1,0 +1,57 @@
+"""@@name@@ 的测试。
+
+两件事：
+
+* **L1 契约自洽** —— ``conformance.local`` 跑的就是中台注册期的同一套规则。
+  中台在注册时会做同样的检查，本地先跑能省一轮「推上去才发现被拒」。
+* **插件体行为** —— 校验器与插件体各自的边界。
+
+跑法::
+
+    pip install -r requirements.txt   # 内含 -e @@sdk_path@@
+    pip install pytest
+    python -m pytest -q
+"""
+
+from __future__ import annotations
+
+import hubkit
+import plugin as plugin_module
+from hubkit import conformance
+from hubkit.proto.hubv1 import envelope_pb2
+
+
+def test_契约一致性():
+    report = conformance.local(plugin_module.Plugin())
+    assert report.passed(), str(report)
+
+
+def test_校验器拒绝缺少必填字段的载荷():
+    env = hubkit.with_payload_json(envelope_pb2.Envelope(message_id="t-1"), {})
+
+    # 第一个参数是 gRPC 的 ServicerContext；这里直接调方法，没有真的上下文，传 None。
+    response = plugin_module.Plugin().validate(None, env)
+    assert not response.valid, "缺少 text 应被拒绝"
+    assert response.issues[0].path == "payload.text"
+
+
+def test_插件体回显载荷():
+    env = hubkit.with_payload_json(envelope_pb2.Envelope(message_id="t-2"), {"text": "你好"})
+
+    out = plugin_module.Plugin().handle(None, env)
+
+    payload, is_json = hubkit.payload_json(out)
+    assert is_json, "输出应是 JSON 载荷"
+    assert payload["echo"] == "@@name@@ 收到: 你好"
+    assert payload["length"] == 2
+
+
+def test_插件体在预算不足时提前放弃():
+    env = hubkit.with_payload_json(envelope_pb2.Envelope(), {"text": "x"})
+    env.deadline_ms = 1  # 截止时间设在过去
+
+    try:
+        plugin_module.Plugin().handle(None, env)
+    except RuntimeError:
+        return
+    raise AssertionError("预算不足时应提前放弃，而不是硬着头皮做完")

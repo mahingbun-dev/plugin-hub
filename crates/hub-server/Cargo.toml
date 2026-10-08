@@ -1,0 +1,47 @@
+[package]
+name = "hub-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hub-core = { path = "../hub-core" }
+hub-api = { path = "../hub-api" }
+anyhow = "1.0.104"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
+axum = "0.8.9"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+hub-store = { version = "0.1.0", path = "../hub-store" }
+hub-registry = { version = "0.1.0", path = "../hub-registry" }
+hub-engine = { version = "0.1.0", path = "../hub-engine" }
+hub-plugin-client = { version = "0.1.0", path = "../hub-plugin-client" }
+hub-grpc = { version = "0.1.0", path = "../hub-grpc" }
+hub-mcp = { version = "0.1.0", path = "../hub-mcp" }
+tokio-util = "0.7.19"
+hub-ops = { version = "0.1.0", path = "../hub-ops" }
+serde_json = "1.0.151"
+hub-observe = { version = "0.1.0", path = "../hub-observe" }
+hub-proto = { version = "0.1.0", path = "../hub-proto" }
+chrono = "0.4.45"
+hub-bus = { version = "0.1.0", path = "../hub-bus" }
+cron = "0.17"
+thiserror = "2.0.20"
+ulid = "3.0.0"
+
+[[bin]]
+name = "hub-server"
+path = "src/main.rs"
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+hub-testkit = { path = "../hub-testkit" }
+redis = { version = "1.7.0", features = ["tokio-comp", "connection-manager"] }
+serde_json = "1.0.151"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "migrate", "macros"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
+tower = { version = "0.5.2", features = ["util"] }
+ulid = "3.0.0"

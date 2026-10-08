@@ -1,0 +1,67 @@
+[package]
+name = "hubkit"
+version = "0.1.0"
+edition = "2021"
+# 放低语言版本下限，插件团队不必跟着中台的工具链走（与 Go SDK 的 go.mod 同一出发点）。
+# 1.85 是 2024 edition 的下限，这里留了余量。
+rust-version = "1.85"
+license = "UNLICENSED"
+publish = false
+description = "anc-hub 插件侧 SDK（Rust）：服务端骨架、自注册、心跳、被摘除后自愈、优雅退出"
+
+# 独立 workspace：本 crate 必须能**单独构建**——它将来是随脚手架包一起发给开发者的，
+# 拿到的工程里它躺在 <工程>/sdk/ 下，中台仓库根本不在旁边。
+# 少了这一行 cargo 会向上找到仓库根的 workspace，把本 crate 当成一个没被 members
+# 收录的野包直接报错。
+[workspace]
+
+[dependencies]
+# 版本与中台侧（crates/hub-proto、crates/hub-plugin-client）刻意保持一致：
+# 插件与中台之间传的是 protobuf，prost / tonic 的线格式在大版本间才会变，
+# 但两边同版本能让「升级一侧忘了另一侧」这类问题根本不出现。
+tonic = { version = "0.14.6", features = [
+    "transport",
+    "codegen",
+    "server",
+    # HTTPS 支持。UAT 的插件面是 https://hub.example.com:8094（经 nginx 终结 TLS），
+    # 不开这两项的话本 SDK 只能连本地 http 中台，形同半个 SDK。
+    #
+    # 用 rustls（ring）而不是 native-tls：后者要链 openssl，离线镜像里多一个系统依赖。
+    # 根证书走**系统信任库**而不是内置的 webpki-roots——内网环境的根 CA 多半装在
+    # 系统的信任库里，内置一份公网根证书列表反而连不上。
+    "tls-ring",
+    "tls-native-roots",
+] }
+tonic-prost = "0.14.6"
+prost = "0.14.4"
+prost-types = "0.14.4"
+tokio = { version = "1.53.1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "signal",
+    "sync",
+] }
+tokio-stream = { version = "0.1.19", features = ["net"] }
+# async_trait 是 tonic 生成代码自己也在用的东西（它经由 tonic::codegen 再导出）。
+# 这里显式依赖，是为了让插件作者能用同一个属性宏实现 Plugin。
+async-trait = "0.1.92"
+serde_json = "1.0.151"
+# 与中台侧（crates/*/Cargo.toml）同一个 ulid、同一个版本：message_id / trace_id 是
+# 幂等键与链路键，它们的格式契约（Crockford base32、26 字符）由这份实现钉住，
+# 两侧各写一份迟早漂移——这与 prost / tonic 对齐版本是同一道理。
+ulid = "3.0.0"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+# 集成测试要自己伪造一个中台（注册 / 心跳 / 注销）并直连插件打它的五个方法。
+# 正常依赖不会传递到 tests/，所以这里必须再列一遍。
+tonic = { version = "0.14.6", features = ["transport", "codegen", "server"] }
+tokio-stream = { version = "0.1.19", features = ["net"] }
+async-trait = "0.1.92"
+serde_json = "1.0.151"
+
+[lib]
+name = "hubkit"
+path = "src/lib.rs"

@@ -1,0 +1,18 @@
+# 依赖（`npm install` 装回来）
+#
+# 这里**不提交** node_modules：随包下发的 SDK 是给开发者的 `npm install` 重新解析的，
+# 而这些依赖里有与平台绑定的二进制，塞进下载包只会白撑几倍体积
+# （中台侧的打包排除项见 README 的「随包下发的排除项」）。
+node_modules/
+
+# 同理不提交 lockfile：本机 npm 指向 registry.npmmirror.com，把解析结果固化下来
+# 等于把镜像地址也一起固化进去了
+package-lock.json
+
+# 本地环境变量
+.env
+.env.local
+
+# 日志与构建产物
+*.log
+/dist/

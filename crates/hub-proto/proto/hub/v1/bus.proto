@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package hub.v1;
+
+option go_package = "github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1";
+
+import "hub/v1/envelope.proto";
+
+// 总线消息：异步执行时在 Redis Stream 上流动的东西。
+//
+// 用 protobuf 而不是 JSON，与 Envelope 同源同理：信封里的 `Any` 载荷是字节，
+// 转成 JSON 势必要 base64 再转回来，中间多一层编解码既费 CPU 又多了出错的地方。
+// Redis 的值本身是二进制安全的，直接放编码后的字节最简单。
+//
+// **粒度是节点而不是整条链**：一条消息 = 一次节点执行 + 投递它的下游。这样单条
+// 消息寿命短（重投便宜）、链路越长并行度越高、节点级重试天然成立。代价是需要
+// 收敛判断（哪些节点都跑完了），那由 `runs` / `run_nodes` 用一条原子 SQL 完成。
+
+// 异步执行消息。
+message BusMessage {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+
+    /// 执行一个节点，然后投递它的下游
+    NODE = 1;
+
+    /// 整条 flow 从头跑（非 DAG 的退化形态，保留给「一次性重放整个 run」）
+    FLOW = 2;
+  }
+
+  Kind kind = 1;
+
+  /// 本次执行。同一个 run 的所有节点消息共享它，收敛判断按它聚合
+  string run_id = 2;
+
+  string flow_name = 3;
+
+  /// 跑的是哪一版编排。**必须带上**：消息可能在总线上停留，而编排随时可能发布
+  /// 新版本；不锁定版本会让「同一次执行的前半段跑 v1、后半段跑 v2」
+  int32 flow_revision = 4;
+
+  /// 要执行的节点。`Kind::FLOW` 时留空
+  string node_id = 5;
+
+  /// 消息第一次进入总线的时刻（Unix 毫秒）。**重投时不变**：它是「这条数据在系统
+  /// 里待了多久」的基准，每次重投都刷新就失去了意义
+  int64 enqueued_at_ms = 6;
+
+  /// 已投递次数（从 1 开始）。超过上限就进死信
+  int32 attempts = 7;
+
+  /// 送给节点的信封。载荷、trace、message_id 全在里面
+  Envelope envelope = 8;
+}

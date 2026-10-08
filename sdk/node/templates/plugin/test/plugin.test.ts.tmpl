@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+import { emptyEnvelope, payloadJSON, withPayloadJSON, type CallContext } from '@@sdk_module@@'
+import { local } from '@@sdk_module@@/conformance'
+
+import { newPlugin } from '../src/plugin.ts'
+
+/** 一个「还剩很多预算、不会被打断」的调用上下文。 */
+function ctx(budgetMs = 30_000): CallContext {
+  return { budgetMs, signal: new AbortController().signal }
+}
+
+/**
+ * 契约一致性检查。
+ *
+ * 中台在注册时会做同样的检查，本地先跑能省一轮「推上去才发现被拒」。
+ * ⚠️ 它全绿**不等于**能接入：这一关看不到你的网络地址，`HUB_ADVERTISE_ADDR`
+ * 填成别人的地址它一样全绿。真正的分水岭是中台能不能拨通你（见 AGENTS.md 的四道关）。
+ */
+test('契约一致性（L1）', () => {
+  const report = local(newPlugin())
+  assert.ok(report.passed(), `契约一致性未通过:\n${report}`)
+})
+
+test('校验器拒绝缺少必填字段的载荷', async () => {
+  const env = withPayloadJSON(emptyEnvelope(), {})
+  const resp = await newPlugin().validate(ctx(), env)
+
+  assert.equal(resp.valid, false)
+  assert.equal(resp.issues[0]?.path, 'payload.text')
+})
+
+test('插件体回显载荷', async () => {
+  const env = withPayloadJSON(emptyEnvelope(), { text: '你好' })
+  const out = await newPlugin().handle(ctx(), env)
+
+  const [payload, ok] = payloadJSON(out)
+  assert.ok(ok, '输出应是 JSON 载荷')
+  assert.equal(payload?.['echo'], '@@name@@ 收到: 你好')
+})
+
+test('预算不足时提前放弃', async () => {
+  const env = withPayloadJSON(emptyEnvelope(), { text: 'x' })
+
+  // 插件体的契约是「返回信封或抛错」，所以断言的是 reject 而不是返回值
+  await assert.rejects(async () => {
+    await newPlugin().handle(ctx(1), env)
+  }, /剩余预算不足/)
+})

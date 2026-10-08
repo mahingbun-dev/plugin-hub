@@ -1,0 +1,57 @@
+# @@name@@ 的运行镜像。
+#
+# 插件按「独立容器」的方式部署：进程独立、用 gRPC 与中台通信、可与中台异机。
+#
+# ⚠️ 基础镜像的标签按你们镜像仓库里实际有的改：内网离线环境要先 `docker load`
+# 导进去，而「标签写的是公网上的那个、仓库里没有」是这类 Dockerfile 最常见的失败。
+#
+# 离线构建的两种做法（二选一）：
+#   1. `cargo vendor` 后把 vendor/ 一起提交，再打开下面 CARGO_NET_OFFLINE 那两行
+#   2. 在构建镜像里配好内网 Cargo 镜像源（~/.cargo/config.toml 的 source 替换）
+
+FROM rust:1.94-slim-bookworm AS build
+WORKDIR /src
+
+# 依赖清单单独一层，利用层缓存：改源码不会让依赖重下一遍
+COPY Cargo.toml Cargo.lock* ./
+COPY @@sdk_path@@/Cargo.toml @@sdk_path@@/
+# 离线构建时打开：cargo 只用 vendor/ 里的依赖，不碰网络
+# ENV CARGO_NET_OFFLINE=true
+
+COPY . .
+
+# 先把依赖编译出来。
+#
+# ⚠️ **这里刻意不加 `--locked`**。上一版加了，理由是「让构建可复现」——但本工程
+# **不发 Cargo.lock**（依赖清单里只有 `Cargo.toml`），而 `--locked` 的语义是
+# 「锁文件必须已存在且不需要改」，于是 cargo 直接拒绝生成它：
+#
+#   error: cannot create the lock file /src/Cargo.lock
+#          because --locked was passed to prevent this
+#
+# 触发条件不是边缘情况：README 的「部署」一节并没有要求先本地构建，所以
+# 「下载工程 → 直接 docker build」必然撞上。第 16 行 `COPY Cargo.toml Cargo.lock* ./`
+# 那个 `*`（锁文件可不存在）本来就在说同一件事，两行是矛盾的。
+#
+# 可复现性并没有丢：`COPY . .` 会把本地构建产生的 Cargo.lock 一起带进来，
+# 于是「跑过一次 cargo build 再打镜像」仍然是锁定的——而那正是推荐的做法。
+RUN cargo build --release && \
+    cp target/release/@@package@@ /out-plugin
+
+FROM debian:bookworm-slim
+# ca-certificates：连 HTTPS 中台要用；tzdata：日志按本地时区看更顺眼
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates tzdata && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /out-plugin /usr/local/bin/plugin
+# 以非 root 运行：插件只需要监听一个高位端口，没有理由拿 root
+RUN useradd --system --create-home --shell /usr/sbin/nologin hub
+USER hub
+
+# 中台能拨通的地址由部署时经 HUB_ADVERTISE_ADDR 注入——
+# 别在镜像里写死 localhost，中台在另一台机器上时它会连不上。
+ENV HUB_LISTEN_ADDR=:9000
+EXPOSE 9000
+
+ENTRYPOINT ["plugin"]

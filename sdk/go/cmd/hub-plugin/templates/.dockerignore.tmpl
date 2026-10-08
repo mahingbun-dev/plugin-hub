@@ -1,0 +1,14 @@
+# 本地构建产物不进构建上下文。
+#
+# **必须有这个文件**：Docker 只认 .dockerignore，**不认 .gitignore**。本 Dockerfile
+# 第 15 行是 `COPY . .`，本地留下的东西会一并跟进去。最要紧的是 `vendor/`：它是
+# `go mod vendor` 的产物（约 15MB），进去之后会被当成「本工程自带 vendor」，
+# 与第 12 行 `COPY go.mod go.sum* ./` 那份依赖声明打架，报错还很难指向根因。
+#
+# 另外两行是本地直接 `go build` 出来的可执行文件——它通常与插件同名（`go build .`
+# 按 module 路径最后一段命名），一个几 MB 的文件每次白传。
+vendor/
+/@@name@@
+
+# 本地环境变量（中台地址等），与 .gitignore 同一个理由
+.env

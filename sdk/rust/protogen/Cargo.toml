@@ -1,0 +1,16 @@
+[package]
+name = "hubkit-protogen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# 独立 workspace：本 crate 是**维护者工具**，不属于 SDK 本身。
+# 不写这一行的话 cargo 会向上找到 sdk/rust 的 workspace 并把本 crate 卷进去，
+# 于是 SDK 的单测会被顺带要求解析 tonic-prost-build 那一大串构建期依赖。
+[workspace]
+
+[dependencies]
+# 用 protoc-bin-vendored 而不是要求维护者装 protoc：与 crates/hub-proto/build.rs 同一套
+# 做法，改契约的人不必先在自己机器上装一个 protoc。
+protoc-bin-vendored = "3.2.0"
+tonic-prost-build = "0.14.6"

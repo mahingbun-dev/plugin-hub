@@ -1,0 +1,45 @@
+# Docker 构建上下文。
+#
+# **这个文件不是可有可无的**。Docker 只认 .dockerignore，**不认 .gitignore**，
+# 而本地开发常是「先在 $PWD 跑 cargo test（写出几 GB 的 target/），
+# 再 docker build .」——没有这个文件，整个 target/ 都会被当作上下文推给 dockerd，
+# 轻则每次白传十几分钟，重则 no space left on device。
+
+# Rust 构建产物：Dockerfile.offline 会在容器内自己编一份，这边的纯属累赘。
+#
+# `target` 这一个词**只锚根目录那一份**（实测：`FROM scratch` + `COPY . .` +
+# `docker export`，根 `target/` 被排除，`sdk/rust/target/` 原样进去了）。
+# ⚠️ **别图省事写成 `**/target`**：`vendor/cc/src/target` 是 `cc` crate 自带的
+# 测试固件目录，排除掉它，离线构建会在缺源文件上失败。只排 `sdk/` 下面那几份。
+target
+sdk/**/target
+**/*.rs.bk
+*.pdb
+
+# 版本控制与本地数据
+.git
+.gitignore
+data
+.env
+.env.local
+*.log
+logs
+
+# 与中台镜像构建无关的子树
+docs
+
+# ---- 以下**不能忽略**，写在这里是给改动者提个醒 ----
+#
+# vendor/     Dockerfile.offline 要 `COPY vendor ./vendor`
+# crates/     `COPY crates ./crates`
+# Cargo.*     `COPY Cargo.toml Cargo.lock ./`
+# deploy/Dockerfile.offline
+#             `-f` 指定的 Dockerfile 不受本文件影响，永远可读
+#
+# **sdk/ 与 examples/ 同样不能忽略**——这一条是踩过才明白的：
+# 本文件是**全局的**，对每一次 docker build 都生效，包括
+# `docker build -f examples/ping-chain/Dockerfile .`。那句 `COPY sdk/go/go.mod ...`
+# 曾因为这里写了 `sdk` 而报 "file not found in build context or excluded by
+# .dockerignore"，插件镜像永远构建不出来。
+#
+# 体积上也不值得省：两者合计 30MB，大头（vendor/）本来就是插件构建要用的。

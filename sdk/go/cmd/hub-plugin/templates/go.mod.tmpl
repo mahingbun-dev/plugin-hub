@@ -1,0 +1,18 @@
+module @@package@@
+
+go 1.25
+
+require @@sdk_module@@ v0.0.0
+
+// SDK 随本工程一起下发在 sdk/ 下，所以这里指的是**包内的相对路径**——
+// 拿到工程就能编，不必先去检出中台仓库，也不必改这一行。
+replace @@sdk_module@@ => @@sdk_path@@
+
+// 首次解析依赖需要能访问 Go 代理（内网没有私有代理，用公共的即可）：
+//
+//   export GOPROXY=https://goproxy.cn,direct
+//   go mod tidy
+//
+// SDK 自己是带 vendor 的，所以它不需要代理；需要代理的是**本工程这一层**
+// （要解析 grpc 与 protobuf）。解析过一次之后 module cache 就有了，
+// 之后再编不需要网络。

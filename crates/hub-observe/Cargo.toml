@@ -1,0 +1,21 @@
+[package]
+name = "hub-observe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait = "0.1.92"
+bytes = "1.12.1"
+http-body-util = "0.1.5"
+hyper = "1.11.1"
+hyper-util = { version = "0.1.20", features = ["client-legacy", "http1", "tokio"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["time"] }
+
+[dev-dependencies]
+axum = "0.8.9"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "time"] }

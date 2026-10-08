@@ -1,0 +1,7 @@
+# 本地开发使用已安装的 stable 工具链。
+#
+# 这里刻意不写死具体版本号：rustup 会为 pin 的版本单独安装一套工具链，
+# 在开发机上引入无谓的安装/回滚风险；构建的可复现性由 CI/镜像侧固定
+# 基础镜像的 rust 版本来保证（见 deploy/Dockerfile 的 rust:1-slim）。
+[toolchain]
+channel = "stable"

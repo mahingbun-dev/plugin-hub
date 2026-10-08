@@ -1,0 +1,36 @@
+[package]
+name = "@@package@@"
+version = "0.1.0"
+edition = "2021"
+# 放低语言版本下限：插件团队不必跟着中台的工具链走（SDK 自己也只要求 1.85）
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+# SDK 随本工程一起下发在 `@@sdk_path@@` 下，所以这里指的是**包内的相对路径**——
+# 拿到工程就能编，不必先去检出中台仓库，也不必改这一行。
+#
+# 它是 crate 名（不是路径）：代码里写 `use @@sdk_module@@::...`。
+@@sdk_module@@ = { path = "@@sdk_path@@" }
+
+# 这两个是插件自己的依赖，不由 SDK 代持：
+#   tokio       —— `#[tokio::main]`，骨架是异步的
+#   serde_json  —— 载荷就是 JSON 对象（google.protobuf.Struct）
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde_json = "1"
+
+[workspace]
+# SDK 自带一个 `[workspace]`（它要能**单独构建**：将来是随包发给开发者的，
+# 中台仓库不在旁边）。这里显式把它排除在本工程的 workspace 之外，
+# 免得 cargo 把「一个自己是 workspace 根的路径依赖」当成成员而报错。
+exclude = ["@@sdk_path@@"]
+
+# 首次构建需要能拉到依赖（内网没有私有 registry 时用公共镜像）：
+#
+#   # ~/.cargo/config.toml
+#   [source.crates-io]
+#   replace-with = "mirrors"
+#   [source.mirrors]
+#   registry = "sparse+https://<你们的内网 Cargo 镜像>/"
+#
+# 依赖解析过一次之后本地就有了，之后的构建不必联网。

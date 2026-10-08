@@ -1,0 +1,88 @@
+//! **L1 契约一致性测试** —— 接入前必须跑通。
+//!
+//! 里面那个 [`契约自洽`] 调的是 `@@sdk_module@@::conformance::check_local`，
+//! 跑的就是中台**注册期**的同一套规则（manifest 与 proto 是否一致、至少声明一条契约、
+//! 工具名合法）。本地先跑一遍，省一轮「推上去才发现被拒」。
+//!
+//! ⚠️ **它绿了不等于能接入**。这一关只看内存里的 manifest 对象与 proto，
+//! **看不到你的网络地址**——`HUB_ADVERTISE_ADDR` 填成别人的地址它一样全绿，
+//! 而插件在真实环境里永远接不进来。真正的分水岭是「中台接受注册」：
+//! 看插件启动日志里有没有 `已注册到中台`。见 `AGENTS.md` 的四道关。
+//!
+//! 用 `#[path]` 把 `src/plugin.rs` 直接当模块编进来，而不是引 crate：
+//! 本工程是一个二进制 crate，`tests/` 下的集成测试**看不到**它，
+//! 而 crate 名还可能是带连字符的（那样在源码里根本写不出来）。
+//! 这个写法还有个附带好处：`plugin.rs` 换了名字，编译期就会报错，
+//! 而不是安静地测了一个旧文件。
+
+#[path = "../src/plugin.rs"]
+mod plugin;
+
+use @@sdk_module@@::conformance;
+use @@sdk_module@@::{envelope, Envelope};
+// 用 `as _` 引入 trait：调 `validate` / `handle` 需要它在作用域里，
+// 但不给它起名字——`Plugin` 这个名字在本文件里指的是 `plugin::Plugin`。
+use @@sdk_module@@::Plugin as _;
+
+/// 用 JSON 载荷拼一个信封。
+fn envelope_with(payload: serde_json::Value) -> Envelope {
+    envelope::with_payload_json(
+        &Envelope {
+            message_id: "test-1".to_string(),
+            ..Default::default()
+        },
+        payload,
+    )
+    .expect("载荷应当是合法的 JSON 对象")
+}
+
+#[test]
+fn 契约自洽() {
+    let report = conformance::check_local(&plugin::Plugin::default());
+    assert!(report.passed(), "契约一致性未通过：\n{report}");
+}
+
+#[tokio::test]
+async fn 校验器拒绝缺少必填字段的载荷() {
+    let response = plugin::Plugin::default()
+        .validate(&envelope_with(serde_json::json!({})))
+        .await
+        .expect("校验器不该报错，它只该回「不合法」");
+
+    assert!(!response.valid, "缺少 text 的载荷应当被拒");
+    assert_eq!(
+        response.issues[0].path, "payload.text",
+        "问题要定位到具体字段，agent 靠它改数据重试"
+    );
+}
+
+#[tokio::test]
+async fn 校验器放行合规载荷() {
+    let response = plugin::Plugin::default()
+        .validate(&envelope_with(serde_json::json!({"text": "你好"})))
+        .await
+        .expect("校验器不该报错");
+
+    assert!(response.valid, "合规载荷应当放行：{:?}", response.issues);
+}
+
+#[tokio::test]
+async fn 插件体回显载荷() {
+    let out = plugin::Plugin::default()
+        .handle(envelope_with(serde_json::json!({"text": "你好"})))
+        .await
+        .expect("处理不该失败");
+
+    let payload = envelope::payload_json(&out).expect("输出应当是 JSON 载荷");
+    assert_eq!(payload["echo"], "@@name@@ 收到: 你好");
+}
+
+#[tokio::test]
+async fn 信封过期时提前放弃() {
+    // deadline 设在过去：插件应当**快速失败**，而不是把时间耗光后靠上层超时兜底
+    let mut envelope = envelope_with(serde_json::json!({"text": "x"}));
+    envelope.deadline_ms = 1;
+
+    let result = plugin::Plugin::default().handle(envelope).await;
+    assert!(result.is_err(), "预算已耗尽时应当放弃，而不是硬着头皮做完");
+}

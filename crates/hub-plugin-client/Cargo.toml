@@ -1,0 +1,15 @@
+[package]
+name = "hub-plugin-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait = "0.1.92"
+hub-proto = { path = "../hub-proto" }
+hub-registry = { path = "../hub-registry" }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["rt", "macros", "sync", "time"] }
+tonic = { version = "0.14.6", features = ["transport", "codegen"] }

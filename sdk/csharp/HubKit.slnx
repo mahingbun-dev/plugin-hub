@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="HubKit.Tests/HubKit.Tests.csproj" />
+  <Project Path="HubKit/HubKit.csproj" />
+  <Project Path="HubProbe/HubProbe.csproj" />
+</Solution>

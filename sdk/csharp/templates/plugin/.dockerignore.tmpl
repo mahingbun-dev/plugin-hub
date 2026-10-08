@@ -1,0 +1,17 @@
+# 本地构建产物不进构建上下文。
+#
+# **必须有这个文件**：Docker 只认 .dockerignore，**不认 .gitignore**。而本 Dockerfile
+# 第 20 行 `dotnet restore` 之后跟着一句 `COPY . .`——它会把**宿主机上**的 obj/ 盖到
+# 容器里刚 restore 出来的那份上。`obj/project.assets.json` 里记的是宿主机的 NuGet
+# 缓存**绝对路径**（`packageFolders`），随后 `--no-restore` 的 publish 找不到包，
+# 报出来的是：
+#
+#   error NETSDK1064: Package Microsoft.Extensions.Configuration.Binder, version 8.0.0
+#                    was not found.
+#
+# 而根因是「上下文里带了本地产物」，从这条报错里完全看不出来。实测复现过。
+#
+# 换句话说：**按 README 先在本地跑过一次构建的工程，`docker build` 必挂**——而那正是
+# 模板希望开发者做的事（先本地验证再上容器）。所以这不是洁癖，是「照着文档走就会踩」。
+**/bin/
+**/obj/

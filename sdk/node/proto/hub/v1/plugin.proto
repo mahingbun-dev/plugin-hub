@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package hub.v1;
+
+option go_package = "github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1";
+
+import "hub/v1/envelope.proto";
+
+// 中台 → 插件。
+//
+// 每个插件必须实现全部方法，缺一不可：
+//   - Validate 是「数据校验规则」，数据进来先过它，通过后才进 Handle
+//   - Handle 是「插件体」，自主实现的数据输入输出
+// 二者同版本发布，规则与实现不可能漂移。
+//
+// 中台按插件自注册时上报的 advertise 地址直连，不要求与中台同机。
+service PluginRuntime {
+  // 拉取 manifest。中台用它核对插件自述与注册时提交的内容是否一致。
+  rpc Describe(DescribeRequest) returns (PluginManifest);
+
+  // 校验器。校验失败按 manifest 的 validation 策略处理（默认拒绝）。
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+
+  // 插件体。
+  rpc Handle(HandleRequest) returns (HandleResponse);
+
+  // 逐条结果的流式版本（大报文 / 多条输出）。中台侧走 server-streaming 转发。
+  rpc HandleStream(HandleRequest) returns (stream HandleResponse);
+
+  // 健康探测。中台在注册时与心跳周期内调用。
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// 插件自述清单。中台据此做契约校验、编排校验与 MCP 工具聚合。
+message PluginManifest {
+  // 插件名（逻辑插件），多版本共存时同名不同 version
+  string name = 1;
+
+  // 语义化版本。flow 通过版本约束（如 ^2.1）锁定实例。
+  string version = 2;
+
+  string description = 3;
+
+  // 负责团队，用于治理与告警归口
+  string owner = 4;
+
+  // 消费的消息类型：上游 produces 必须与这里的 fq_name 完全一致才能连成一条 flow
+  repeated MessageContract consumes = 5;
+
+  // 生产的消息类型
+  repeated MessageContract produces = 6;
+
+  // 暴露给 agent 的能力。中台自动聚合为统一 MCP 工具面，名称加 `插件名__` 前缀。
+  repeated ToolDecl tools = 7;
+
+  ValidationPolicy validation = 8;
+
+  // 声明可调用的目标插件名（插件互调的权限名单）。
+  //
+  // 注册时**可选**：不带此字段的老插件 / 无互调需求的插件无需改动，是否放行其互调
+  // 由中台 `HUB_PLUGIN_CALL_POLICY`（allow|declared，默认 allow）决定；一旦声明，
+  // 中台在调用期强制校验目标插件是否在名单内，不在一律拒绝。
+  // manifest 以字节存库，追加字段对旧 hub / 旧插件双向兼容，无迁移。
+  repeated string invokes = 9;
+}
+
+message MessageContract {
+  // 全限定消息名，例如 `wms.v1.OrderCreated` —— 契约的唯一标识。
+  // 改名或改包名视为破坏性变更，注册会被拒绝。
+  string fq_name = 1;
+
+  string description = 2;
+}
+
+message ToolDecl {
+  // 短名。中台聚合时加前缀，插件间重名不会冲突。
+  string name = 1;
+
+  string description = 2;
+
+  // MCP 工具的入参 JSON Schema（字符串形式）
+  string input_schema_json = 3;
+
+  // 是否属于「改变生产走向」的操作。为 true 时 agent 只能提交草稿，需人工审批后生效。
+  bool requires_approval = 4;
+}
+
+message ValidationPolicy {
+  FailureAction on_failure = 1;
+}
+
+enum FailureAction {
+  FAILURE_ACTION_UNSPECIFIED = 0;
+
+  // 拒绝：短路当前链路并返回结构化错误（默认）
+  FAILURE_ACTION_REJECT = 1;
+
+  // 影子模式：放行但记录告警。用于新规则上线前的观察期。
+  FAILURE_ACTION_SHADOW = 2;
+}
+
+message DescribeRequest {}
+
+message ValidateRequest {
+  Envelope envelope = 1;
+}
+
+message ValidateResponse {
+  bool valid = 1;
+  repeated ValidationIssue issues = 2;
+}
+
+message ValidationIssue {
+  // 字段路径，例如 `payload.items[2].sku`
+  string path = 1;
+
+  string message = 2;
+
+  Severity severity = 3;
+}
+
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_ERROR = 1;
+  SEVERITY_WARNING = 2;
+}
+
+message HandleRequest {
+  Envelope envelope = 1;
+}
+
+message HandleResponse {
+  // 输出信封。中台会校验其 payload 的全限定名是否落在 manifest.produces 内。
+  Envelope envelope = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+  string message = 2;
+}

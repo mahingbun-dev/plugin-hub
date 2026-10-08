@@ -1,0 +1,191 @@
+# @@name@@
+
+一个 [anc-hub](.)（内网控制中台）的**插件**，用 Python 写。
+
+中台是「插座」，不含业务语义；业务能力由**进程外插件**提供——独立进程、gRPC、
+任意语言。本工程用 `hubkit`（Python 版插件 SDK）实现了中台要求的
+`hub.v1.PluginRuntime` 五个方法，并在启动时向中台自注册。
+
+## 快速开始
+
+```bash
+# 1. 装依赖。requirements.txt 里既配了镜像源，也用 -e 指向了包内的 SDK（./sdk）
+pip install -r requirements.txt
+pip install pytest                # 测试跑在 pytest 上
+
+# 2. 跑 L1 契约自洽检查（不需要中台）
+python -m pytest -q
+
+# 3. 起一个本地中台（中台仓库根目录）
+cargo run -p hub-mock
+#    确认对面是谁：curl http://127.0.0.1:8092/health
+#    "name":"hub-mock" 是在对 mock 验，"name":"anc-hub" 才是真中台
+
+# 4. 起插件。它会连 HUB_ADDR 指定的中台并自注册
+HUB_ADDR=@@hub_addr@@ \
+HUB_ADVERTISE_ADDR=http://127.0.0.1:9000 \
+python main.py
+```
+
+跑起来之后，插件日志里会出现这样一行（JSON，一行一条）：
+
+```json
+{"time":"...","level":"INFO","msg":"已注册到中台","plugin":"@@name@@","version":"0.1.0","instance":"主机名-12345"}
+```
+
+它就是 **L3（中台接受注册）** 的判据。中台那边也可以用 HTTP 面核对：
+
+```bash
+curl http://127.0.0.1:8092/plugins     # 看在册的
+curl http://127.0.0.1:8092/rejections  # 看被拒的，含原因与出路
+```
+
+## 环境变量
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `HUB_ADDR` | 是 | 中台插件面地址。**本工程里填的是 `@@hub_addr@@`** |
+| `HUB_ADVERTISE_ADDR` | 是 | **中台能拨通**的本插件地址，例如 `http://203.0.113.10:9000` |
+| `HUB_LISTEN_ADDR` | 否 | 本插件监听地址，缺省 `:9000`（等价于双栈所有网卡） |
+| `HUB_INSTANCE_ID` | 否 | 实例标识，缺省「主机名-PID」。**同 ID 重复注册视为进程重启**；不设它反而没问题，设成空白会被拒 |
+| `HUB_LOG_LEVEL` | 否 | `debug` / `info` / `warn` / `error`，缺省 `info` |
+
+> ⚠️ **`HUB_ADVERTISE_ADDR` 要写「中台视角」的地址。** 中台在注册时会连它做可达性探测，
+> 探不通直接拒绝注册（拒绝码 `UNREACHABLE`）。中台与插件同机时 `http://127.0.0.1:9000`
+> 可以；中台在别的机器时必须写本机的内网 IP 或域名。**本机自测通了不算数**——你走的是
+> 回环，中台从它那边拨不拨得到，这个动作根本验不出来。
+
+## 依赖从哪来
+
+第三方依赖只有两个：`grpcio` 与 `protobuf`。它们是 **SDK 自己声明的**（见
+`sdk/pyproject.toml`），`pip install -r requirements.txt` 装 SDK 时会一并解析——
+**版本下限只有一个来源**，本工程里不再抄一遍。
+
+内网没有私有 PyPI 镜像，用公共镜像即可（内网可达），已经写在 `requirements.txt` 里：
+
+```
+--index-url https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+临时用一次也行：
+
+```bash
+pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -e ./sdk
+```
+
+> **版本下限是钉死的，不是客套话。** `sdk/hubkit/proto/hubv1/` 下的生成代码里带两条
+> 运行时校验（protobuf 的 `ValidateProtobufRuntimeVersion` 与 grpcio 的
+> `GRPC_GENERATED_VERSION`），装上更旧的版本会在 **import 期**直接抛错。
+
+## 工程结构
+
+```
+main.py              入口：调 hubkit.run，配置全来自环境变量
+plugin.py            插件体：manifest() / descriptor() / validate() / handle()
+test_plugin.py       L1 契约自洽 + 插件体行为的测试
+requirements.txt     依赖（含 -e ./sdk）
+Dockerfile           运行镜像
+sdk/                 hubkit 源码（随包下发，不必去检出中台仓库）
+```
+
+`plugin.py` 里的四件事与中台的对应关系：
+
+| 本工程 | 中台拿它做什么 |
+|---|---|
+| `manifest()` | 契约校验、编排连线、MCP 工具聚合 |
+| `descriptor()` | 建立契约基线、做字段级兼容检查 |
+| `validate()` | 数据进来先过它，**通过才进 `handle()`** |
+| `handle()` | 插件体，返回输出信封 |
+
+不用 `descriptor()` 也行：本工程用 `google.protobuf.Struct` 承载 JSON 载荷，
+没有自己的 proto，返回空即可。需要与其他插件在 flow 里传**类型化**消息时，
+再加一份自己的 `.proto`、生成 Python 代码、用 `hubkit.descriptor_of(...)` 打包。
+
+## 调试
+
+```bash
+# 直连插件（不需要中台）：验「插件自己做得对不对」
+python -m hubkit conform http://127.0.0.1:9000
+
+# 打中台的 HTTP 面：验「注册进来之后，中台按登记的地址真的拨得到它」
+curl http://127.0.0.1:8092/plugins
+```
+
+`conform` 跑的检查项与 Go 侧的 `hubprobe conform` 逐条相同（Health / Describe 应答、
+空信封不崩、插件体真的返回信封），有任何 ✗ 时退出码为 1。
+
+**这两组不能互相代替**：`conform` 连的是插件自己的地址，证明不了中台能不能按你登记的
+`HUB_ADVERTISE_ADDR` 拨到你——那是网络视角的事。
+
+## 插件模型的四条约定
+
+1. **校验器先行**：中台一定先调 `validate()`，通过才调 `handle()`。校验不通过时插件体
+   不会被调用，链路当场短路。
+2. **强制无状态**：实例内存不保证跨调用保留（换来的是热切换零代价、可水平扩展、
+   重放与测试都简单）。需要跨调用保留的东西走中台的状态接口。
+3. **契约不可漂移**：同一版本号的 manifest 与 proto 不可变更，中台会拒绝「同号不同
+   契约」的注册；改了请升版本号。中台还会做**字段级兼容检查**——删字段、改字段类型、
+   改字段编号都会被拒；新增可选字段、新增枚举值放行；字段改名放行但会告警。
+4. **预算来自信封**：`hubkit.budget(env)` 给出剩余秒数（未设置时返回 `None`）。
+   紧张时应提前放弃，而不是把时间耗光后靠上层超时兜底——那样调用方连「为什么慢」
+   都看不出来。
+
+## 跨调用保留状态（HubState）
+
+需要跨调用保留的东西（登录缓存、去重标记、游标、限流计数）**不要**放实例内存，
+走中台的 HubState。宿主在**每次注册成功后**会把客户端注入进来，凭证不用你自己管。
+
+本工程**已经把客户端接好了**：`plugin.py` 覆写了 `set_state`，`handle` 里有一个
+真的在用的例子（跨调用的调用计数）。你要做的只是把它换成自己的业务。
+
+```python
+state = self.state()            # None = 还没注册上，按 fail-open 处理
+if state is not None:
+    raw = state.get("demo", "calls")        # bytes | None，None 表示键不存在
+    state.put("demo", "calls", b"1", 600)   # ttl 单位是**秒**，0 = 不过期
+    state.delete("demo", "calls")           # -> bool
+    state.scan("demo", "c:", 100)           # prefix 传 "" = 扫整个命名空间
+```
+
+几条容易踩的：
+
+- **namespace / key 只允许 `[A-Za-z0-9_.-]`**、非空、最长 200 字节。中台按凭证反查
+  你的插件名并强制加前缀 `hub:state:{插件名}:`，你填的 namespace 只是**子空间**。
+- **前缀里没有版本号**：同一插件的所有版本共用一个状态空间，升版本不会清空状态，
+  但两个版本往同一个 namespace 写就是互相覆盖。
+- **TTL 粒度是秒**：不足 1 秒会**在本地直接报错**（Go 侧会静默截断成 0 = 永不过期，
+  与调用方的意图正好相反，所以这边选择报错）。
+- **上限**：单值 1MB、一次 `scan` 最多 1000 条。
+- **失败要 fail-open**：拿不到缓存就回源，别让一次状态抖动把业务调用带下水。
+  凭证失效（`UNAUTHENTICATED`）时宿主会自己重新注册换新凭证，不用你管。
+
+本地调试时 mock 中台也实现了这一套（键名规则与真中台同源），所以不必连真中台。
+
+## 部署
+
+`Dockerfile` 按「独立容器」的方式部署插件：
+
+```bash
+docker build -t @@package@@:dev .
+docker run --rm -p 9000:9000 \
+  -e HUB_ADDR=@@hub_addr@@ \
+  -e HUB_ADVERTISE_ADDR=http://<中台能拨通的地址>:9000 \
+  @@package@@:dev
+```
+
+- 中台与插件**不要求同机**
+- `HUB_ADVERTISE_ADDR` 由**部署时**注入，别写进镜像
+- 升级时先起新版本副本、再把 flow 的版本约束抬高即可灰度，**不需要重启中台**
+- 容器里 python 必须**直接**收 SIGTERM（Dockerfile 用的是 exec 形式的 ENTRYPOINT），
+  否则优雅注销那条路会断——实例要等心跳超时才从中台消失
+
+### 中台证书由内网 CA 签发时
+
+Python 侧设 `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH` 指向 CA bundle：
+
+```bash
+export GRPC_DEFAULT_SSL_ROOTS_FILE_PATH=/ca/ca.crt
+```
+
+（Go 侧在 macOS 上不读 `SSL_CERT_FILE`，这是两门语言少数不一致的地方之一；
+在**开发机上自测跨机接入**时，把插件跑在 Linux 容器里可以绕开这一整类问题。）

@@ -1,0 +1,11 @@
+# dotnet build / dotnet publish 的产物。
+#
+# 这两个目录各自都可能有几十 MB，且**没有任何提交的价值**：
+# 它们是本机编译的产物，换台机器、换个 SDK 版本就该重来。
+**/bin/
+**/obj/
+
+# 测试与发布产物
+TestResults/
+*.trx
+publish/

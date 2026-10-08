@@ -1,0 +1,22 @@
+# Rust 构建产物。
+#
+# 用 `**/target/` 而不是分别写根目录与 SDK 那份：SDK 是包内的路径依赖，它自己
+# 也能构建，产物落在它自己的 target/ 下，两处都要排。
+#
+# ⚠️ 这里**不能**写成「SDK 路径 + /target/」那种拼法：SDK 路径的取值本身就带前导
+# `./`，拼出来是 `./sdk/target/`，而 git 不认模式里的前导 `./`（实测 `git check-ignore`
+# 不命中）。后果不是「少排一个目录」那么轻：本地 `cd sdk && cargo build` 之后 SDK 的
+# target/ 会出现在 `git status` 里，一次 `git add -A` 就把它（几 GB）带进仓库。
+# 通配不依赖那个取值怎么拼，所以这里用 `**/target/`。
+**/target/
+
+# 本地环境变量（中台地址等）。
+# ⚠️ 别把 HUB_ADVERTISE_ADDR 之类的真实地址提交进来——它按环境不同而不同，
+# 写进仓库只会让下一个人以为那是「正确的值」。
+.env
+
+# 编辑器 / 系统噪音
+.idea/
+.vscode/
+*.swp
+.DS_Store

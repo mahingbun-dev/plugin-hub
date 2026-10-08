@@ -1,0 +1,19 @@
+# 测试数据库的兜底连接串。
+#
+# 为什么需要这个文件：所有带 `#[sqlx::test]` 的用例都要求环境里有 DATABASE_URL
+# （缺失时 sqlx 直接 panic「DATABASE_URL must be set」，一条用例都跑不起来）。
+# 本机裸跑 `cargo test -p hub-mcp` 的 shell 里往往没有——这里给出一个与
+# 仓库约定一致的默认值（host 端口 55433，hub/hub，库 hub_test），
+# 让测试命令零配置可跑。
+#
+# 一次性准备（本地 PG 容器，映射 55433）：
+#   docker run -d --name anc-hub-dev-pg -p 55433:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+#   docker exec anc-hub-dev-pg psql -U postgres -c "CREATE ROLE hub LOGIN PASSWORD 'hub' CREATEDB;"
+#   docker exec anc-hub-dev-pg psql -U postgres -c "CREATE DATABASE hub_test OWNER hub;"
+# CREATEDB 是必须的：sqlx 每条用例建一个临时库、跑完迁移再销毁。
+#
+# 优先级：shell 里已 export 的 DATABASE_URL 覆盖这里的值（cargo [env] 只补缺），
+# 所以任何显式设置环境变量的用法都不受本文件影响。
+
+[env]
+DATABASE_URL = "postgresql://hub:hub@127.0.0.1:55433/hub_test"

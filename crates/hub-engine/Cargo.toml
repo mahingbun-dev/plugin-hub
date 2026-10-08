@@ -1,0 +1,33 @@
+[package]
+name = "hub-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hub-proto = { path = "../hub-proto" }
+hub-registry = { path = "../hub-registry" }
+hub-plugin-client = { path = "../hub-plugin-client" }
+chrono = "0.4.45"
+thiserror = "2.0.20"
+tracing = "0.1.44"
+tokio = { version = "1.53.1", features = ["macros", "rt", "time"] }
+hub-flow = { version = "0.1.0", path = "../hub-flow" }
+ulid = "3.0.0"
+hub-store = { version = "0.1.0", path = "../hub-store" }
+serde_json = "1.0.151"
+hub-observe = { version = "0.1.0", path = "../hub-observe" }
+metrics = "0.24"
+hub-bus = { version = "0.1.0", path = "../hub-bus" }
+
+[dev-dependencies]
+hub-grpc = { path = "../hub-grpc" }
+hub-store = { path = "../hub-store" }
+hub-testkit = { path = "../hub-testkit" }
+prost-types = "0.14.4"
+serde_json = "1.0.151"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "migrate", "macros"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net"] }
+tonic = { version = "0.14.6", features = ["transport", "codegen", "server"] }

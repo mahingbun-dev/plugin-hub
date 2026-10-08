@@ -1,0 +1,33 @@
+[package]
+name = "hub-mock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hub-contract = { version = "0.1.0", path = "../hub-contract" }
+# 只为一条测试：断言 mock 的名字与真中台的名字（hub_core::SERVICE_NAME）不同——
+# 那是「我打的是谁」的判据，撞名就等于把这条判据废掉
+hub-core = { version = "0.1.0", path = "../hub-core" }
+hub-proto = { version = "0.1.0", path = "../hub-proto" }
+hub-registry = { version = "0.1.0", path = "../hub-registry" }
+# 可达性探测要真的去拨插件——这正是本地最该验的那一步
+hub-plugin-client = { version = "0.1.0", path = "../hub-plugin-client" }
+tonic = { version = "0.14.6", features = ["transport", "codegen", "server"] }
+# TcpListenerStream：先把 listener 建起来才能给出「端口被谁占了」这种可照做的错误。
+# 交给 tonic 自己 bind 的话，绑定失败只会得到一个 tonic 错误。
+tokio-stream = { version = "0.1.19", features = ["net"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal"] }
+axum = "0.8.9"
+prost = "0.14.4"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["rt", "macros", "time"] }
+# PluginProbe 用的是 #[async_trait]，测试里要伪造一个不可达的探针
+async-trait = "0.1.92"

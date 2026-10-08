@@ -1,0 +1,209 @@
+"""@@name@@ —— 一个 anc-hub（控制中台）插件。
+
+中台与插件不要求同机；插件是独立进程，用 gRPC 与中台通信。
+插件被**强制无状态**：实例内存不保证跨调用保留，需要跨调用保留的东西走中台的
+HubState 接口——本模板**已经把客户端接好了**（见下面 :meth:`Plugin.set_state`
+与 :meth:`Plugin.handle` 里的示例）。
+
+要改的通常只有这个文件。
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Any
+
+from @@sdk_module@@ import (
+    STRUCT_FQ_NAME,
+    StateClient,
+    Plugin as HubKitPlugin,
+    budget,
+    invalid,
+    issue,
+    payload_json,
+    valid,
+    with_payload_json,
+)
+from @@sdk_module@@.proto.hubv1 import envelope_pb2, plugin_pb2
+
+# 继续处理所需的最小剩余预算（秒）。
+#
+# 信封带着绝对 deadline 逐跳递减；预算不够时应当提前放弃，让失败快速冒泡，
+# 而不是把时间耗光后靠上层超时兜底——那样调用方连「为什么慢」都看不出来。
+MIN_BUDGET = 0.1
+
+
+class Plugin(HubKitPlugin):
+    """@@name@@ 的实现。
+
+    它用 ``google.protobuf.Struct`` 承载 JSON 载荷：agent 经 MCP、外部系统经 HTTP
+    调用本插件时，中台会把 JSON 对象包成 Struct 送进来，用 ``payload_json`` 取。
+
+    如果需要与其他插件在 flow 里传递**类型化**的业务消息，再加一份自己的 .proto、
+    生成 Python 代码、在 ``descriptor()`` 里返回它，并在 manifest 的 produces 中声明。
+
+    这个类里还要再写的就是 ``validate()`` 与 ``handle()``（``manifest()`` 上面已有、
+    ``descriptor()`` 走缺省）。若本插件有值得探测的依赖（下游不通时**不该**接流量），
+    可以再定义一个 ``health()`` 方法：骨架默认**恒报健康、根本不问插件**，只有定义了
+    才会调它，返回的必须是 ``plugin_pb2.HealthResponse``。默认不调是有原因的——中台
+    在**注册期**就会探测这个接口，返回 ``healthy=False`` 会让注册被拒，「启动瞬间依赖
+    还没就绪」于是变成「这个插件注册不上」，要等下一轮重试才可能好。要用就得自己扛住
+    这条。
+    """
+
+    def __init__(self) -> None:
+        # state 是跨调用状态（HubState）的客户端，由骨架在**每次注册成功后**注入。
+        # 它是 None 就说明这个插件走的是无状态那一路——**用它之前必须判空**。
+        #
+        # 骨架从注册循环那个线程调用 set_state，而 handle 跑在 gRPC 的工作线程上，
+        # 所以这个字段必须过锁：裸赋值下 CPython 不会崩，但可能读到半成品状态。
+        self._state: StateClient | None = None
+        self._state_lock = threading.Lock()
+
+    def set_state(self, state: StateClient) -> None:
+        """收到骨架注入的 HubState 客户端（本模板已经接好了）。
+
+        # 什么时候需要它
+
+        插件实例**不保证**跨调用保留内存（热切换零代价、可水平扩展就是这么来的）。
+        要跨调用保留东西——登录缓存、去重标记、游标、限流计数——就得走 HubState。
+
+        # 怎么用
+
+        在 :meth:`handle` 里取出来用即可，**记得判空**：取到 None 就说明还没注册上
+        （骨架在注册成功后才注入），这时按 fail-open 处理——拿不到缓存就回源，
+        别让一次状态抖动把业务调用带下水。
+
+        ::
+
+            state = self.state()
+            if state is not None:
+                cached = state.get("sessions", user_id)     # bytes | None
+                state.put("sessions", user_id, blob, 1800)  # ttl 单位是**秒**，0 = 不过期
+                state.delete("sessions", user_id)           # -> bool，删不存在的键返回 False
+                state.scan("sessions", "user:", 100)        # prefix 传 "" 表示扫整个命名空间
+
+        # 两个必须知道的约束
+
+        * **命名空间是插件隔离的**：中台按注册凭证反查出你的插件名、强制拼进键前缀
+          （``hub:state:{插件名}:{namespace}:{key}``），你自报的 namespace 只是前缀下的
+          **子空间**。所以你只写自己的业务子空间（``sessions``、``cursors``），
+          既不需要也不应该写插件名。
+        * **namespace 与 key 都只允许 ``[A-Za-z0-9_.-]``、非空、最长 200 字节**。
+          放行 ``*`` 是漏洞不是功能：前缀靠字符串拼接，通配符会让 scan 变成跨命名空间的
+          模式匹配。
+
+        TTL 的粒度是**秒**：不足 1 秒的值这里直接报错（Go 侧会静默截断成 0 = 永不过期，
+        与调用方的意图正好相反）。
+
+        本地调试时 mock 中台也实现了这一套（键名规则与真中台同源），所以不必连真中台。
+        """
+        with self._state_lock:
+            self._state = state
+
+    def state(self) -> StateClient | None:
+        """当前的状态客户端；``None`` 表示还没注册上（或这个插件不用状态）。"""
+        with self._state_lock:
+            return self._state
+
+    def manifest(self) -> plugin_pb2.PluginManifest:
+        """声明插件的身份、契约与暴露给 agent 的能力。
+
+        同一版本号的 manifest 不可变更——中台会拒绝「同号不同契约」的注册，
+        改了请升版本号。
+        """
+        return plugin_pb2.PluginManifest(
+            name="@@name@@",
+            version="0.1.0",
+            description="TODO: 一句话说明这个插件干什么",
+            owner="TODO: 负责团队",
+            # 接受直接调用的 JSON 载荷。它是 well-known 类型，不必出现在自己的 proto 里。
+            consumes=[plugin_pb2.MessageContract(fq_name=STRUCT_FQ_NAME)],
+            # 暴露给 agent 的能力。它会聚合进中台统一的 MCP 工具面，名字是
+            # `插件名__工具名`（跨插件重名不冲突）——注册成功后 agent 拉一次
+            # tools/list 就能看见并调用，中台不用重启。声明本身也会落进契约，
+            # `get_plugin` 查得到。
+            #
+            # 两条仍然成立的限制：**工具面变了不会主动通知已连接的 agent**
+            # （`notifications/tools/list_changed` 未实现），所以 agent 要重新拉一次
+            # 才看得见；插件实例被摘除后，它的工具也会随之从列表里消失。
+            tools=[
+                plugin_pb2.ToolDecl(
+                    name="echo",
+                    description="TODO: 这个工具干什么 —— agent 靠这句描述决定何时调用它",
+                    input_schema_json=(
+                        '{"type":"object","properties":'
+                        '{"text":{"type":"string","description":"要回显的文本"}},'
+                        '"required":["text"]}'
+                    ),
+                )
+            ],
+        )
+
+    def descriptor(self) -> bytes:
+        """返回本插件的 proto 编译产物，中台据此建立契约基线并做字段级兼容检查。
+
+        只用 Struct 载荷的插件没有自己的 proto，返回空即可——中台允许空 descriptor，
+        只要 manifest 里没声明自有类型。有自有 proto 时用
+        ``hubkit.descriptor_of(xxx_pb2.DESCRIPTOR)``。
+        """
+        return b""
+
+    def validate(self, ctx, env: envelope_pb2.Envelope) -> plugin_pb2.ValidateResponse:
+        """数据校验规则。
+
+        中台在把数据交给 :meth:`handle` 之前**一定**先调用它；返回 ``valid=False``
+        时链路短路，``handle`` 不会被调用。规则与插件体同版本发布，因此不可能与实现漂移。
+
+        ``ctx`` 是本次调用的 gRPC ``ServicerContext``（Go 侧对应 ``context.Context``）：
+        ``ctx.abort()`` 能把这次调用直接判失败，``ctx.time_remaining()`` 读剩余时间。
+        本工程的测试是直接调这个方法的，那时 ``ctx`` 传的是 ``None``——所以别在
+        ``ctx`` 上不加判空就取属性。
+        """
+        payload, is_json = payload_json(env)
+        if not is_json:
+            return invalid(issue("payload", "需要 JSON 对象载荷"))
+
+        text = payload.get("text")
+        if not isinstance(text, str) or not text:
+            # path 要能定位到具体字段，中台会原样把它回给调用方，agent 靠它改数据重试
+            return invalid(issue("payload.text", "缺少必填字段 text"))
+
+        return valid()
+
+    def handle(self, ctx, env: envelope_pb2.Envelope) -> envelope_pb2.Envelope:
+        """插件体。"""
+        # 第二个值是「载荷是不是 JSON」，别拿它当「载荷有没有内容」用：
+        # 载荷是空 JSON 对象时得到的是 `({}, True)`。
+        payload, _ = payload_json(env)
+        text = (payload or {}).get("text") or ""
+
+        # envelope 里的 trace/deadline/subject 会被中台透传，需要时可以直接读
+        left = budget(env)
+        if left is not None and left < MIN_BUDGET:
+            raise RuntimeError(f"剩余预算不足（{left:.3f}s），放弃处理")
+
+        # ---- HubState 演示：一个跨调用的调用计数 ----
+        #
+        # 插件实例**不保证**跨调用保留内存，所以这个计数放在中台的 HubState 里：
+        # 插件重启、换副本，它都接着涨——这正是 HubState 存在的理由。
+        #
+        # 拿不到客户端时（还没注册上）整个调用照常进行，只是不带计数——这就是
+        # fail-open：状态是**增强**，不该成为调用链路上的单点。
+        # 不需要状态的插件把这一段删掉即可，别处一行都不用改。
+        state = self.state()
+        calls: int | None = None
+        if state is not None:
+            raw = state.get("demo", "calls")
+            try:
+                calls = int(raw) + 1 if raw else 1
+            except ValueError:
+                # 值被人手改坏了不该让业务调用跟着失败，当没缓存处理
+                calls = 1
+            # ttl 传 0 = 不过期。要过期就传秒数（粒度是秒，不足 1 秒会直接报错）
+            state.put("demo", "calls", str(calls).encode("utf-8"))
+
+        out: dict[str, Any] = {"echo": f"@@name@@ 收到: {text}", "length": len(text)}
+        if calls is not None:
+            out["calls"] = calls
+        return with_payload_json(env, out)

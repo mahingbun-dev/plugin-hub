@@ -1,0 +1,22 @@
+[package]
+name = "hub-bus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+hub-proto = { version = "0.1.0", path = "../hub-proto" }
+prost = "0.14.4"
+# connection-manager 让连接在 Redis 抖动后自愈；tokio-comp 是异步驱动。
+# 中台的队列是「中短途」——消息活不过几分钟，真正的持久化在 PG。
+redis = { version = "1.7.0", features = ["tokio-comp", "connection-manager"] }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["macros", "rt", "time"] }
+tracing = "0.1.44"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
+# 测试用 ULID 生成互不相同的 Stream 名，避免用例之间互相看见对方的消息
+ulid = "3.0.0"

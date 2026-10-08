@@ -1,0 +1,15 @@
+# 本地构建产物不进构建上下文。
+#
+# **必须有这个文件**：Docker 只认 .dockerignore，**不认 .gitignore**。这里比其它几门
+# 更要紧——本 Dockerfile 第 18 行是 `COPY . .`，它会用**宿主机上**的 `node_modules/`
+# 盖掉容器里刚 `npm install` 出来的那一份。而宿主机那份是按 macOS/arm64 装的，
+# 进 linux/amd64 的容器之后原生模块（@grpc/grpc-js 的依赖里有）直接不可用，
+# 报错却发生在运行期、看起来像「插件依赖装错了」。
+#
+# 换句话说：**按 README 先在本地 `npm install` 跑过一次的工程，打出来的镜像可能是坏的**
+# ——而那正是模板希望开发者做的事。
+node_modules/
+
+# 同样的道理，日志与本地环境变量也不该进镜像
+*.log
+.env

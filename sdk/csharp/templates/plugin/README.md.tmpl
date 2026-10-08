@@ -1,0 +1,288 @@
+# @@name@@
+
+anc-hub 插件（C# / .NET）。
+
+## 跑起来
+
+```bash
+# SDK 随本工程一起下发在 @@sdk_path@@ 下，ProjectReference 已经指好了，不用改
+dotnet build
+dotnet test --project tests/       # L1 契约自洽
+
+HUB_ADDR=http://127.0.0.1:8093 \
+HUB_ADVERTISE_ADDR=http://127.0.0.1:9000 \
+dotnet run
+```
+
+| 环境变量 | 必填 | 说明 |
+|---|---|---|
+| `HUB_ADDR` | 是 | 中台插件面地址。**本工程里填的是 `@@hub_addr@@`** |
+| `HUB_ADVERTISE_ADDR` | 是 | **中台能拨通**的本插件地址 |
+| `HUB_LISTEN_ADDR` | 否 | 本插件监听地址，缺省 `:9000` |
+| `HUB_INSTANCE_ID` | 否 | 实例标识，缺省 `主机名-PID`。**不设**与设成**空串**是一回事（都会自动生成）；只有**纯空白**才会带着一个空白 id 去注册而被拒——踩坑的是复制粘贴带上的空格 |
+| `HUB_LOG_LEVEL` | 否 | `debug` / `info` / `warn` / `error` |
+
+> `dotnet test` 要写成 `--project tests/`：本工程根目录下只有 `Plugin.csproj` 一个工程，
+> 而测试在 `tests/` 子目录里。写成 `dotnet test tests/` 会被 .NET 10 直接拒掉
+> （「应通过 '--project' 或 '--solution' 指定」）。
+>
+> ⚠️ **别再顺手加 `--nologo` 一类的参数**：.NET 10 的 `dotnet test` 不认它，会把它原样
+> 透传给测试宿主（xunit v3 的 MTP runner），宿主认不出就退出，报出来的是
+> 「运行了零个测试，错误: 1」（退出码 5）——看着像测试工程坏了，其实只是多了一个参数。
+> 实测：同一条命令去掉 `--nologo` 就是 5/5 通过。真要给测试宿主传参，放在 `--` 之后。
+
+## 接入四道关
+
+从「本地能跑」到「中台真的调得动」，中间有四道关，**四关全过才算接进来了**。
+坑在于每关的结论出现在**不同的地方**——最后一关的结论甚至不在命令输出里，而在日志里。
+逐条勾：
+
+- [ ] **L1 契约自洽** —— 验：`dotnet test --project tests/` 全绿
+- [ ] **L2 运行时自检** —— 验：`dotnet run --project @@sdk_path@@/HubProbe -- conform <插件地址>` 五项全 ✓
+- [ ] **L3 中台接受注册** —— 验：**插件启动日志里出现「已注册到中台」**（这一关不看命令输出）
+- [ ] **L4 端到端调用** —— 验：`hubprobe e2e <中台地址> @@name@@ --payload '{...}'` 拿回信封
+
+> ## ⚠️ L1、L2 全绿不等于能接入
+>
+> 这两关验的都是「插件自己做得对不对」，最难的第 3 关它们**够不着**：
+>
+> - **L1 看不到你的网络地址**——它只看内存里的 manifest 与 proto，`HUB_ADVERTISE_ADDR`
+>   填成别人的地址它一样全绿。
+> - **L2 也验不了中台能否拨通**——L2 是**你**从本机直连插件（`http://127.0.0.1:9000`），
+>   走的是回环；中台从它那边拨不拨得到，命令里根本看不出来。
+>
+> 地址填错时 L1、L2 照样全绿，插件却在真实环境里永远接不进来。别拿这两关当交付判据。
+
+`hubprobe` 是 SDK 里的调试工具，**随本工程一起下发**在 `@@sdk_path@@/HubProbe`，
+所以不必另外安装：
+
+```bash
+# 本工程目录下直接跑
+dotnet run --project @@sdk_path@@/HubProbe -- conform http://127.0.0.1:9000
+```
+
+⚠️ 它只实现了 `conform` 与 `health`，**没有 `e2e`**。第四关（经中台 HTTP 面真实调用一次）
+请用中台仓库里 Go SDK 的 `hubprobe e2e`，或 `curl` 中台的 ingress。
+
+## 照着敲：从零到接入成功
+
+```bash
+# 0) 工程已由脚手架生成，这里从编译开始
+dotnet build
+
+# ---------- L1 契约自洽 ----------
+dotnet test --project tests/
+# 期望：已通过！总计 5，成功 5
+# 里面那条「契约一致性」跑的就是中台注册期的同一套规则
+
+# ---------- L2 运行时自检 ----------
+# 另开一个终端把插件跑起来。中台不在线也能跑完这一关——conform 是直连插件的
+HUB_ADDR=http://127.0.0.1:8093 \
+HUB_ADVERTISE_ADDR=http://127.0.0.1:9000 \
+dotnet run
+
+dotnet run --project @@sdk_path@@/HubProbe -- conform http://127.0.0.1:9000
+# 期望见下面 L2 那节的实测输出
+
+# ---------- L3 中台接受注册 ----------
+# 换成真实的中台地址，以及「中台能拨通」的本插件地址，然后**看日志**
+HUB_ADDR=https://hub.example.com:8094 \
+HUB_ADVERTISE_ADDR=http://203.0.113.10:9000 \
+dotnet run
+# 期望：日志里出现 "已注册到中台"。容器里部署时用 docker logs -f <容器>
+
+# ---------- L4 端到端调用 ----------
+hubprobe e2e https://hub.example.com:8081/hub-api @@name@@ --payload '{"text":"你好"}'
+```
+
+下面是每一关的展开：做什么、怎么验、全绿意味着什么、不过怎么办。
+
+### L1 契约自洽
+
+- **做什么**：Manifest / Descriptor / Validate / Handle 四个成员齐全；manifest 的自述
+  （`consumes` / `produces` / `tools`）与提交的 proto 一致；工具名合法
+  （只允许字母数字与 `_-`，同一插件内不重名）；**至少声明一条契约**。
+- **怎么验**：`dotnet test --project tests/`。工程里那条「契约一致性」调的是
+  `Conformance.Local`，跑的就是中台注册期的同一套规则。全绿时报告是这六行（顺序固定）：
+  `manifest 存在` / `插件名合法` / `版本号存在` / `descriptor 可用` /
+  `声明的类型都在 descriptor 中`（或 `声明了契约`）/ `工具声明合法`。
+- **不过怎么办**：报什么改什么——`✗ 声明了契约` → 在 `Plugin.Manifest` 里加
+  `Consumes`（直接调用的插件声明 `Envelopes.StructFqName`）或 `Produces`；
+  工具名带 `.`、空格、中文 → 换掉；想在同版本号上改契约 → 升版本号。
+
+  ⚠️ **`✗ 声明了契约` 是本地比中台更严的唯一一条**：中台接受一份 `produces` / `consumes`
+  都为空的 manifest，本地这关却会红。别用「中台能收」当借口跳过它。
+
+### L2 运行时自检
+
+- **做什么**：把插件真的跑起来，验 gRPC 起得来、Health / Describe 应答、校验器对空信封
+  不崩、插件体返回的确实是信封。
+- **怎么验**：`dotnet run --project @@sdk_path@@/HubProbe -- conform http://127.0.0.1:9000`。
+  实测输出（真跑出来的，不是抄的）：
+
+  ```text
+  契约一致性检查 http://127.0.0.1:19211
+    ✓ Health 可应答
+    ✓ Describe 可应答 —— @@name@@@0.1.0
+    ✓ 校验器对空信封不崩
+    ✓ 校验器可处理 JSON 载荷 —— 拒绝（1 条问题）—— 探针载荷不满足业务规则属正常
+    ✓ 插件体返回信封 —— 已返回 JSON 载荷
+  ```
+
+  注意「校验器可处理 JSON 载荷 —— **拒绝**」是正常结果：探针载荷本来就不满足你的业务规则，
+  只要不是超时或抛异常就算过。
+- **不过怎么办**：
+  - 「Health 可应答」✗ 是这一关最常见的失败，而且多半不是健康检查的问题，是**地址/端口**：
+    地址写错、端口不对（缺省监听 `:9000`）、插件没起来——三种都会落在这一行。
+  - Describe 报错 → manifest 有问题，回 L1。
+  - 「插件体返回信封」✗ → `HandleAsync` 返回了 null，中台会把它当成插件异常。
+  - 「校验器可处理 JSON 载荷」✗ → `ValidateAsync` 在这个载荷上**超时或抛异常**了
+    （被业务规则拒绝**不算** ✗）。
+
+### L3 中台接受注册 —— 结论在插件启动日志里
+
+这是最反直觉的一关：**验收结果不在任何命令的输出里，只在插件自己的启动日志里。**
+
+- **怎么验**：用真实的 `HUB_ADDR` 与 `HUB_ADVERTISE_ADDR` 启动插件，**看它的启动日志**。
+  成功长这样（在本地 mock 中台上真跑出来的；插件名 / 端口按你的环境替换）：
+
+  ```json
+  {"time":"2026-09-18T15:14:19.236527+08:00","level":"INFO","msg":"插件 gRPC 已监听","listen":"[::]:19211","advertise":"http://127.0.0.1:19211"}
+  {"time":"2026-09-18T15:14:19.240523+08:00","level":"INFO","msg":"插件已启动","hub":"http://127.0.0.1:18093","instance":"dotnet-e2e-1"}
+  {"time":"2026-09-18T15:14:19.295785+08:00","level":"INFO","msg":"已注册到中台","plugin":"@@name@@","version":"0.1.0","instance":"dotnet-e2e-1"}
+  ```
+
+  看见 `"msg":"已注册到中台"` 才算这一关过了。日志是**一条记录一行 JSON**，形状与 Go 侧
+  slog 一致（同样的 `time` / `level` / `msg` 三列加自定义字段），所以两侧的采集规则、
+  `jq` 配方是同一套。
+
+  失败长这样（中台每条拒绝原因各占一行，最后一行收尾说明有几条、多久后重试）：
+
+  ```json
+  {"time":"2026-09-18T15:14:31.298956+08:00","level":"ERROR","msg":"中台拒绝了注册","code":"BREAKING_CHANGE","message":"相对版本 1.0.0 存在破坏性契约变更","detail":"wms.v1.Order.sku（编号 1，类型 string）已被删除；..."}
+  {"time":"2026-09-18T15:14:31.298970+08:00","level":"ERROR","msg":"注册未通过，稍后重试","reasons":1,"retry_in":"5s"}
+  ```
+
+  `detail` 会把该改什么直接写出来——**别只看 `code`**，它只够定位到一类问题。
+  失败会按 `retry_in` 一直重试（中台可能比你晚起来，这是刻意的），所以失败日志是**反复刷**的
+  ——别只 `cat` 一次就下结论，等一拍看它有没有翻成「已注册到中台」。
+
+- **不过怎么办**：照着 `code` 改：
+
+  | 拒绝码 | 意思 | 怎么改 |
+  |---|---|---|
+  | `UNREACHABLE` | 中台拨不通你自报的地址 | 几乎总是 `HUB_ADVERTISE_ADDR` 写错了，见下面的自查 |
+  | `BREAKING_CHANGE` | 新版本里删了基线字段、改了类型或字段编号 | **升版本号在这里没用**——出路是把这些字段按原编号原类型改回 |
+  | `VERSION_CONFLICT` | 同版本号但契约或 manifest 与库里不一致 | 版本号是制品身份，**同号必须同内容**，改了就得升版本号 |
+  | `INSTANCE_CONFLICT` | `instance_id` 为空 / 过长 / 被**别的插件**占用 | 换一个实例标识；同一插件重注册（换版本是升级、同版本是重启）是允许的 |
+  | `MANIFEST_INVALID` / `DESCRIPTOR_INVALID` / `TOOL_CONFLICT` | 契约层问题 | L1 本该挡住。出现说明没跑 L1 |
+
+### L4 端到端调用
+
+- **做什么**：经中台的 ingress（HTTP 面）真实调用一次，验「调用方 → 中台 → 插件 → 中台」
+  整条链路，且信封能回来。前三关都是分头验的，只有这一关把它们串起来。
+- **怎么验**：`hubprobe e2e <中台地址> @@name@@ --payload '{"text":"你好"}'`。
+  本地打 mock 时是 `http://127.0.0.1:8092`，打 UAT 时是 `https://hub.example.com:8081/hub-api`。
+
+  ⚠️ **mock 中台跑不了这一关**：`hub-mock` 只提供 `/plugins`、`/rejections`、`/health`
+  三个 HTTP 路由，**没有 ingress**。要验 L4 得用真中台。
+
+  判通过的完整条件是「状态码 `200`、响应是 JSON **对象**、且里面的 `plugin` 是个**非空字符串**」
+  ——三条缺一不可。中间层把一份错误响应配成 200 转发时，正好长成「是对象但没有 `plugin`」，
+  验收命令一被骗过去，代价就是一次错误的交付。
+
+## ⚠️ 最大的坑：`HUB_ADVERTISE_ADDR` 要写「中台视角」的地址
+
+中台在注册时会**连你上报的地址做可达性探测**，探不通直接拒绝注册（`UNREACHABLE`）。
+所以它是「从中台那边拨得通」的地址，而不是本机视角的 localhost：
+
+- 中台与本插件同机 → `http://127.0.0.1:9000` 可以
+- 中台在别的机器 → 必须写中台能拨通的内网 IP 或域名，例如 `http://203.0.113.10:9000`
+
+**自查方法（照着做，别猜）：**
+
+1. 先看 `HUB_ADDR` 填的是什么。它是 `http://127.0.0.1:...`（中台就跟你同机），
+   advertise 写 `127.0.0.1` 就够；它是域名或内网 IP（中台在别处），advertise 就必须是
+   「中台那侧路由得到」的地址。
+2. 容器 / 独立部署时写宿主的内网 IP 或容器网络的 IP，**不要**写 `127.0.0.1`——
+   那个回环地址在中台眼里指的是中台自己。
+3. 把下面这条命令拿到**能代表中台视角的机器**上拨一次：
+
+   ```bash
+   dotnet run --project @@sdk_path@@/HubProbe -- health http://203.0.113.10:9000
+   ```
+
+   拨得通才算数。**在插件自己那台机器上 `curl 127.0.0.1:9000` 通，什么也证明不了**。
+
+## 插件模型
+
+- **校验器先行**：中台一定先调 `ValidateAsync`，通过才调 `HandleAsync`。校验不通过时
+  `HandleAsync` 不会被调用，链路当场短路。
+- **强制无状态**：实例内存不保证跨调用保留（这样热切换零代价、可水平扩展）。
+  需要跨调用保留的东西要走中台的状态接口，见下面「跨调用保留状态」。
+- **契约不可漂移**：同一版本号的 manifest 与 proto 不可变更，改了请升版本号；
+  中台会拒绝「同号不同契约」的注册。
+- **预算来自信封**：`Envelopes.Budget(env)` 给出剩余时间，紧张时应提前放弃，
+  而不是把时间耗光后靠上层超时兜底。
+- **零停机升级**：插件启动后会自己注册进中台，**不需要重启中台**；升级时先起新版本副本、
+  再把 flow 的版本约束抬高即可灰度。
+
+## 跨调用保留状态（HubState）
+
+需要跨调用保留的东西（登录缓存、去重标记、游标……）**不要**放实例内存，走 HubState：
+实现 `IStateAware`，宿主会在注册成功后把 `StateClient` 注入给你，**凭证不用你自己管**。
+
+```csharp
+public sealed class Plugin : IPlugin, IStateAware
+{
+    // 注入来自注册循环那个任务，handler 跑在别的任务上——同步是**实现方**的责任
+    private volatile StateClient? _state;
+
+    public void SetState(StateClient state) => _state = state;
+
+    // 在 HandleAsync 里：
+    //   await _state.PutAsync("cache", key, bytes, TimeSpan.FromMinutes(10), ct);
+    //   var (value, found) = await _state.GetAsync("cache", key, ct);
+}
+```
+
+几条容易踩的：
+
+- **键的 namespace / key 只允许 `[A-Za-z0-9_.-]`**（前缀与冒号都不行）。中台会按凭证反查
+  你的插件名并强制加前缀 `hub:state:{插件名}:`，你填的 namespace 只是子空间。
+- **前缀里没有版本号**：同一插件的所有版本共用一个状态空间，升版本不会清空状态，
+  但两个版本往同一个 namespace 写就是互相覆盖。
+- **TTL 粒度是秒**，`TimeSpan.Zero` 表示不过期；不足 1 秒会被截断为 0（= 永不过期）。
+- **上限**：单值 1MB、一次 Scan 最多 1000 条——这两条 SDK 会在本地就拦下并抛
+  `HubStateException`，错误里写明上限与实收。
+- **失败要 fail-open**：拿不到缓存就回源，别让一次状态抖动把业务调用带下水。
+  凭证失效（`Unauthenticated`）时宿主会自动重新注册换新凭证，不用你管。
+
+## C# 侧特有的三个坑
+
+1. **`global.json` 不能删**。它写着 `"test": { "runner": "Microsoft.Testing.Platform" }`。
+   .NET 10 SDK 起，`dotnet test` 缺省的 VSTest 通道对 MTP 项目已被移除，
+   删了这个文件 `dotnet test` 会直接报错。
+2. **`tests/` 是独立工程**。`Plugin.csproj` 里有 `<Compile Remove="tests/**;sdk/**" />`：
+   去掉它，测试源码与随包 SDK 的源码（里面还有 SDK 自己的测试工程）会被编进插件本体。
+3. **macOS(Apple Silicon) 上首次构建可能要装 Rosetta**。SDK 用 Grpc.Tools 在构建时从
+   `.proto` 生成 C# 代码，而 Grpc.Tools 只提供 **x86_64 的 macOS 版 protoc**。
+   没装 Rosetta 时会以 `error MSB6003: ... Bad CPU type in executable` 失败——
+   报错里完全看不出是 CPU 架构的事。装一次即可：
+   `softwareupdate --install-rosetta --agree-to-license`。
+   Linux / Windows / x64 macOS 上不存在这个问题（Docker 构建走 Linux，天然没事）。
+
+## 部署
+
+按「独立容器」的方式部署（见 anc-gateway 仓库的 `docs/design.md`）：插件进程独立、
+用 gRPC 与中台通信、可与中台异机。生成的 `Dockerfile` 是多阶段构建，改成你们团队的
+镜像发布流程即可；运行镜像是 **`dotnet/aspnet`** 而不是 `dotnet/runtime`
+（插件用 Kestrel 托 gRPC 服务，框架引用里带着 `Microsoft.AspNetCore.App`）。
+
+容器里看 L3 的注册结果用 `docker logs -f <容器>`。
+
+## 详见
+
+上面这四道关背后的完整背景——网络拓扑、注册期每一步校验的细节、常见故障的排查路径——
+**详见 anc-gateway 仓库的 `docs/plugin-onboarding.md`**。那份文档是插件接入的唯一入口，
+本文件只保证你下完包就有一条能照着走的路。

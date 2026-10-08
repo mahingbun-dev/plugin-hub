@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- 插件是独立进程：SDK 同时要**当服务端**（实现 PluginRuntime）与**当客户端**
+         （调 PluginRegistry / HubState），所以两侧的包都要引。 -->
+    <OutputType>Library</OutputType>
+    <RootNamespace>HubKit</RootNamespace>
+    <AssemblyName>HubKit</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- 少了这一条，`dotnet build` 会把「缺 XML 注释」当噪音刷满屏 -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ASP.NET Core 的框架引用：SDK 用 Kestrel 托 gRPC 服务、用 IHostApplicationLifetime
+         接 SIGTERM/SIGINT。显式写出来而不是依赖 Grpc.AspNetCore 顺带带进来——
+         依赖别人的传递引用活着，别人哪天改了依赖图，炸的是我们。 -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 少数几个 internal 的辅助是测试要看的（如时长的人话格式化）。
+         与其为了测试把它们变成公开 API，不如把可见性开给测试程序集——
+         公开面一旦发出去就收不回来了。 -->
+    <InternalsVisibleTo Include="HubKit.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.83.0" />
+    <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
+    <!-- Grpc.Tools 自带 protoc 与 grpc_csharp_plugin，**不要求单独安装 protoc**。
+         PrivateAssets=All：它是构建期工具，不该传递给引用本 SDK 的工程。 -->
+    <PackageReference Include="Grpc.Tools" Version="2.83.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- proto 是 crates/hub-proto 的拷贝（见 sdk/csharp/sync-protos.sh）。
+         各文件的 GrpcServices 按「谁调谁」定，多生成一份服务端壳子是白编译：
+           - envelope：纯消息，没有 service
+           - plugin  ：插件**实现**它，中台调过来 → Both（模板要能起服务端）
+           - registry：插件**调**它 → Client
+           - state   ：插件**调**它 → Client
+           - gateway ：插件**调**它 → Client -->
+    <Protobuf Include="protos/hub/v1/envelope.proto" GrpcServices="None" ProtoRoot="protos" />
+    <Protobuf Include="protos/hub/v1/plugin.proto" GrpcServices="Both" ProtoRoot="protos" />
+    <Protobuf Include="protos/hub/v1/registry.proto" GrpcServices="Client" ProtoRoot="protos" />
+    <Protobuf Include="protos/hub/v1/state.proto" GrpcServices="Client" ProtoRoot="protos" />
+    <Protobuf Include="protos/hub/v1/gateway.proto" GrpcServices="Client" ProtoRoot="protos" />
+  </ItemGroup>
+
+</Project>

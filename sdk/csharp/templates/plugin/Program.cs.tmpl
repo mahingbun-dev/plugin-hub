@@ -1,0 +1,15 @@
+using @@package@@;
+using @@sdk_module@@;
+
+// @@name@@ —— 一个 anc-hub 插件。
+//
+// 配置全部来自环境变量：
+//   HUB_ADDR            中台插件面地址（必填）
+//   HUB_ADVERTISE_ADDR  中台可达的本插件地址（必填）
+//   HUB_LISTEN_ADDR     本插件监听地址（缺省 :9000）
+//   HUB_INSTANCE_ID     实例标识（缺省 主机名-PID）
+//   HUB_LOG_LEVEL       debug / info / warn / error
+//
+// PluginHost 会把其余一切处理掉：起 gRPC 服务、向中台自注册、维持心跳、
+// 被摘除后自动重新注册、收到 SIGTERM/SIGINT 时优雅注销。
+return await PluginHost.RunAsync(new Plugin(), HubConfig.FromEnv());

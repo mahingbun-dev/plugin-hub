@@ -1,0 +1,57 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# sqlx 离线元数据（离线编译需要，因此【提交】；此处仅忽略临时产物）
+# .sqlx/ 请勿加入本文件
+
+# 环境变量与本地数据
+.env
+.env.local
+/data/
+
+# 依赖快照与构建产物
+#
+# 注意这里是 `/vendor/`（带前导斜杠）——只忽略**根目录**下 cargo 的那份快照
+#（离线构建用，几百 MB，按需用 `cargo vendor` 自行生成）。
+# Go 的 vendor 在 sdk/go/ 与 examples/ping-chain 下，**是提交进 git 的**：
+# Go 官方支持该机制，服务器无外网时它最不容易出岔子
+#（不会出现「改了 go.mod 却忘了同步快照」这种只在 CI 上才暴露的失败）。
+/vendor/
+/wheels/
+/deps.tar.gz
+*.tar.gz
+
+# go build 会在包目录留下一个同名二进制。开发者在 SDK 目录顺手跑一次
+# `go build ./...` 就会留下十几 MB 的可执行文件，它长得就像个普通文件，
+# 很容易被 git add 进去。
+examples/ping-chain/ping-chain
+sdk/go/cmd/hub-plugin/hub-plugin
+sdk/go/cmd/hubprobe/hubprobe
+
+# Python。
+#
+# 仓库里的脚本一跑就会在边上留一个 __pycache__/。
+#
+# **`.venv/` 与构建产物不入库**：把虚拟环境提交进来等于把整套依赖按**开发机的
+# 平台**固化下来——换台机器就装不上，而且 grpcio 这类 C 扩展的 wheel 本身就与
+# manylinux 标签绑定。要用请按各工程的依赖清单重建。
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+
+# 编辑器与系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# 日志
+*.log
+/logs/

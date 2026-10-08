@@ -1,0 +1,85 @@
+# AGENTS.md
+
+给**在这个工程里干活的编码 agent**：改插件、跑验证、排查接入问题之前先读这份。
+
+本工程是 `@@name@@`——一个 anc-hub（控制中台）的插件。人看的说明在
+[`README.md`](README.md)，那份更啰嗦、也把 Rust 特有的细节讲得更细；这份是给 agent 的
+执行清单，四道关那一段与所有语言的模板**同源**（由中台侧统一维护，改一处六处生效）。
+
+## 这个工程长什么样
+
+```
+src/main.rs          入口：调 hubkit::run，配置全来自环境变量
+src/plugin.rs        插件体：manifest() / validate() / handle()
+tests/conformance.rs 契约一致性测试——它跑的就是中台注册期的同一套规则
+Cargo.toml           依赖。注意 SDK 是包内路径依赖（`@@sdk_path@@`）
+@@sdk_path@@/               SDK 源码，随本工程一起下发，**不要改它**
+Dockerfile           多阶段构建，按「独立容器」部署
+```
+
+要改的通常只有 `src/plugin.rs`。另外几个文件是骨架，除非要加类型化契约或换部署方式。
+
+**不要改 `@@sdk_path@@/` 下面的东西**：它是随包下发的 SDK 副本，改了它等于在你的工程里
+私藏一个分叉的 SDK——中台侧升级后没人会想起来这里还有一份。要改 SDK 请回中台仓库提。
+
+## 本工程的命令
+
+```bash
+cargo test          # L1 契约自洽：tests/conformance.rs 跑的就是中台注册期的规则
+cargo run           # 起来后自己向 HUB_ADDR 注册，并按中台指定的周期发心跳
+cargo build --release
+```
+
+环境变量：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `HUB_ADDR` | 是 | 中台插件面地址。**本工程里填的是 `@@hub_addr@@`** |
+| `HUB_ADVERTISE_ADDR` | 是 | **中台能拨通**的本插件地址 |
+| `HUB_LISTEN_ADDR` | 否 | 本插件监听地址，缺省 `:9000` |
+| `HUB_INSTANCE_ID` | 否 | 实例标识，缺省「主机名-PID」 |
+| `HUB_LOG_LEVEL` | 否 | `debug` / `info` / `warn` / `error` |
+
+> **不要设成空串**：`HUB_INSTANCE_ID` 不设会被 SDK 自动生成，而设成**纯空白**
+> （复制粘贴带上的空格）会带着一个空白 id 去注册，被拒（`INSTANCE_CONFLICT`）。
+
+## 给 agent 的三条特别提醒
+
+**1. 不要用「`cargo test` 过了」当作接入成功的证据。** 那只是 L1。真正难的是 L3——
+中台能不能拨通你上报的地址。下面那份清单里有为什么。
+
+**2. 改动契约之前先看影响面。** 同版本号的 manifest 与 proto 不可变更；改了要升版本号。
+删字段、改类型、改编号会被 `BREAKING_CHANGE` 拒，而**升版本号不是出路**——
+基线版本里已有的字段只能按原编号原类型改回来。
+
+**3. Rust 这边有两个语言特有的坑：**
+- **`@@sdk_path@@/Cargo.toml` 里有一个 `[workspace]`**，本工程的 `Cargo.toml` 里也有一个
+  `[workspace]` 并把它 `exclude` 掉了。这是有意的：SDK 必须能**单独构建**（它随包发给
+  开发者时中台仓库不在旁边）。别把这两处删了，删了 cargo 会报「package believes it's
+  in a workspace when it's not」。
+- **`Plugin` 是 `async_trait` 的**，写实现时属性宏不能漏：`#[@@sdk_module@@::async_trait]`。
+  漏了会报一堆「method not found」，而报错信息里不会提到 async_trait，很容易往错的方向查。
+
+---
+
+以下四节是**所有语言的插件都一样**的接入流程。它由中台侧统一维护、内联进本文件，
+所以这里不重复讲怎么构建、怎么跑——那些在上面的「本工程的命令」里。
+
+@@onboarding@@
+
+---
+
+## 这个工程的部署
+
+生成的 `Dockerfile` 是多阶段构建，改成你们团队的镜像发布流程即可。要点：
+
+- 中台与插件**不要求同机**，用 gRPC 通信，可以与中台异机部署
+- `HUB_ADVERTISE_ADDR` 由**部署时**注入，别写进镜像——中台在别的机器时，
+  镜像里写死的 `localhost` 会指到中台自己
+- 插件启动后自己注册进中台，**不需要重启中台**；升级时先起新版本副本、
+  再把 flow 的版本约束抬高即可灰度
+
+## 接入前
+
+在插件仓库里保留 `tests/conformance.rs` 里那个 `契约自洽` 用例——它跑的就是中台注册期的
+校验规则，是 L1 的全部内容。删了它，L1 就没有任何东西在守了。

@@ -1,0 +1,16 @@
+# 本地构建产物不进构建上下文。
+#
+# **必须有这个文件**：Docker 只认 .dockerignore，**不认 .gitignore**。这里最要紧的
+# 一项是 `target/`——本机跑过一次 `cargo build` 就是几个 GB，而本 Dockerfile 第 19 行
+# 的 `COPY . .` 会把它整个带进上下文（并且盖掉容器里自己编的那一份）。
+#
+# 与 README 的流程配套：那份文档让人先在本地 `cargo test` 验一遍，于是 `target/`
+# 就存在了。没有这个文件，每次 `docker build` 都要白传几 GB——而内网 docker 数据根
+# 是按 10G thin 卷切的，这不是「慢一点」而已。
+target/
+
+# SDK 是包内的路径依赖，它自己也能构建（产物落在它自己的 target/ 下）
+sdk/target/
+
+# 本地环境变量（中台地址等），与 .gitignore 同一个理由
+.env

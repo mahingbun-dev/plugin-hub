@@ -1,0 +1,22 @@
+// Command @@name@@ 是一个 anc-hub 插件。
+//
+// 中台与插件不要求同机；插件是独立进程，用 gRPC 与中台通信。
+// 启动时会向 HUB_ADDR 指定的中台自注册，并按中台指定的周期发心跳。
+package main
+
+import (
+	"log"
+
+	"@@sdk_module@@/hubkit"
+)
+
+func main() {
+	// 配置全部来自环境变量：
+	//   HUB_ADDR            中台插件面地址（必填）
+	//   HUB_ADVERTISE_ADDR  中台可达的本插件地址（必填）
+	//   HUB_LISTEN_ADDR     本插件监听地址（缺省 :9000）
+	//   HUB_LOG_LEVEL       debug/info/warn/error
+	if err := hubkit.Run(NewPlugin(), hubkit.ConfigFromEnv()); err != nil {
+		log.Fatal(err)
+	}
+}

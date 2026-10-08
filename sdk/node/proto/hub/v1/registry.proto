@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+package hub.v1;
+
+option go_package = "github.com/mahingbun-dev/anc-hub/sdk/go/proto/hubv1;hubv1";
+
+import "hub/v1/plugin.proto";
+
+// 插件 → 中台。
+//
+// 插件是独立的进程/容器，可能部署在任何主机上，因此这条链路要经 nginx 的
+// grpc_pass 独立端口进来（见 docs/design.md 的网络拓扑）。
+//
+// 心跳刻意用定时 unary 而非长连接 stream：避开 gRPC 经 nginx 的保活与超时坑。
+service PluginRegistry {
+  // 自注册。中台收到后会做三件事，任一不通过即拒绝：
+  //   1. 可达性探测（试连 advertise_addr 并调 Health）
+  //   2. descriptor 解析与字段级兼容检查
+  //   3. MCP 工具名冲突检测
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // 优雅退出时主动摘除；未调用则由心跳超时兜底。
+  rpc Unregister(UnregisterRequest) returns (UnregisterResponse);
+}
+
+message RegisterRequest {
+  string plugin_name = 1;
+
+  string version = 2;
+
+  // 实例唯一标识（容器启动时生成）。同一插件的多副本共用一个插件定义，
+  // 实例各自独立，按 (插件名, 版本) 归组。
+  string instance_id = 3;
+
+  // 中台可达的 gRPC 地址。中台按此地址回调插件，注册时会先探测连通性，
+  // 避免出现「注册成功但永远调不通」这种最难排查的状态。
+  string advertise_addr = 4;
+
+  PluginManifest manifest = 5;
+
+  // `google.protobuf.FileDescriptorSet` 的序列化字节。
+  // 中台据此建立契约基线，做字段级兼容检查。只发本插件自己的 proto，不含依赖。
+  bytes descriptor_set = 6;
+}
+
+message RegisterResponse {
+  bool accepted = 1;
+
+  string instance_id = 2;
+
+  // 中台指定的心跳周期，插件应遵守
+  int32 heartbeat_interval_seconds = 3;
+
+  repeated Rejection rejections = 4;
+
+  repeated string warnings = 5;
+
+  // 外置状态（HubState）凭证。插件调用 HubState 时经 gRPC metadata
+  // `x-hub-state-token` 携带，中台据此确定插件身份并强制加命名空间前缀。
+  //
+  // 每次注册轮换：重复注册视为进程重启，旧凭证立即失效。
+  // 空值表示该实例不可使用 HubState（迁移前登记的旧行）。
+  string state_token = 6;
+}
+
+message Rejection {
+  RejectCode code = 1;
+
+  string message = 2;
+
+  // 具体细节，例如「字段 wms.v1.Order.sku 由 string 改为 int64」
+  string detail = 3;
+}
+
+enum RejectCode {
+  REJECT_CODE_UNSPECIFIED = 0;
+
+  // 可达性探测失败：地址不通或 Health 返回不健康
+  REJECT_CODE_UNREACHABLE = 1;
+
+  // descriptor 无法解析
+  REJECT_CODE_DESCRIPTOR_INVALID = 2;
+
+  // 字段级不兼容：删字段、改类型、改编号、改包名或消息名
+  REJECT_CODE_BREAKING_CHANGE = 3;
+
+  // MCP 工具名与既有插件冲突
+  REJECT_CODE_TOOL_CONFLICT = 4;
+
+  // 同一 (插件名, 版本) 下已有实例，但 manifest 不一致
+  REJECT_CODE_VERSION_CONFLICT = 5;
+
+  // manifest 本身非法（缺 name/version、produces 不在 descriptor 中定义等）
+  REJECT_CODE_MANIFEST_INVALID = 6;
+
+  REJECT_CODE_INTERNAL = 7;
+
+  // instance_id 不可用：为空、超长，或已被**其它插件**占用。
+  //
+  // 实例行同时是 HubState 状态凭证的载体，而 instance_id 由插件自己生成。顶掉别的
+  // 插件的行会让原插件从自己的实例列表里消失（选中它时 NoHealthyInstance），而它的
+  // 心跳仍按 instance_id 命中、察觉不到丢了注册——两边于是每次重注册都互相顶掉。
+  // 所以属主不是本插件就拒绝；同一插件换版本/重启则放行（实例行随之迁移）。
+  REJECT_CODE_INSTANCE_CONFLICT = 8;
+}
+
+message HeartbeatRequest {
+  string instance_id = 1;
+}
+
+message HeartbeatResponse {
+  bool accepted = 1;
+
+  int32 heartbeat_interval_seconds = 2;
+
+  // 中台可要求插件重新注册（例如契约基线变更后）
+  bool reregister_required = 3;
+}
+
+message UnregisterRequest {
+  string instance_id = 1;
+  string reason = 2;
+
+  // 注册时中台下发的状态凭证（`RegisterResponse.state_token`）。
+  //
+  // **注销要凭它认出「你是这一行的主人」。** `instance_id` 由插件自己生成，不同
+  // 插件之间可以撞（缺省「主机名-PID」在同一 host 网络、容器 PID 又都是 1 时
+  // 必然撞），而注销原本只按 `instance_id` 删行、不看属主——于是两个撞了 id 的
+  // 插件里，谁先退出谁就把**对方**那一行删掉；对方的心跳仍按 instance_id 命中、
+  // 返回 accepted，**完全察觉不到自己从注册表里消失了**（实测：auth 重启一次，
+  // sql-executor 的工具从 MCP 工具面上全部消失，而它自己的日志停在「已注册到
+  // 中台」之后再无输出）。
+  //
+  // 带上凭证之后这条路径自然消失：**没注册成功就没有凭证，也就注销不了**。
+  // 这正是中台既有的立场——不信插件自报的身份，只信注册时下发的凭证
+  // （HubState 的认证同此，见 `hub_store::instances::plugin_of_state_token`）。
+  //
+  // 留空（旧版插件）一律拒绝。代价只是优雅退出退化成「等心跳超时被摘除」
+  // （`sweep_stale` 会兜住），而放行的代价是可能删掉别的插件的实例行。
+  string state_token = 3;
+}
+
+message UnregisterResponse {}
