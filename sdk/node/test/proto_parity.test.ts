@@ -44,7 +44,7 @@ test('.proto 与 crates/hub-proto 的契约原文逐字一致', (t) => {
 test('well-known 类型随包下发', () => {
   // proto-loader 找不到 import 时会直接抛错，而内网机器上未必装着 protoc 的 include 目录
   for (const file of ['any.proto', 'struct.proto']) {
-    const full = path.join(PROTO_ROOT, 'google', 'protobuf', file)
+    const full = path.join(PROTO_ROOT, 'google', 'protobuf', path.basename(file))
     assert.ok(existsSync(full), `${full} 不存在`)
     assert.ok(readFileSync(full, 'utf8').includes('package google.protobuf'))
   }

@@ -1,148 +1,164 @@
 # plugin-hub
 
-> **Rust 插件中台** —— 契约中心 · 注册发现 · 声明式编排 · 事件总线 · MCP 工具面
+English | [简体中文](README.zh-CN.md)
 
-plugin-hub 是一个进程外插件架构的控制中台。核心只做「插座」，**不含任何业务语义**：业务能力全部由**插件**提供——独立容器、gRPC 接口、任意语言（默认 Go SDK），注册即用，无需重启中台。
+> **Plugin hub in Rust** — contract center · registry & discovery · declarative orchestration · event bus · MCP tool surface
 
-它解决的是这类问题：多个业务系统需要统一的接入点、契约变更需要可控、调用链需要可观测、AI agent 需要通过 MCP 统一调度这些能力——而业务代码保持独立部署、独立技术栈、独立发布节奏。
+![plugin-hub architecture](docs/assets/hero.png)
 
-## 目录
+plugin-hub is the control hub for an out-of-process plugin architecture. The core only provides the "socket" and contains **no business semantics**: every business capability is supplied by a **plugin** — a separate container exposing a gRPC interface, in any language (Go SDK by default). Register and it is usable immediately, with no hub restart.
 
-- [产品特性](#产品特性)
-- [架构](#架构)
-- [核心概念](#核心概念)
-- [快速开始](#快速开始)
-- [Agent 接入（MCP）](#agent-接入mcp)
-- [HTTP API 参考](#http-api-参考)
-- [插件开发](#插件开发)
-- [配置](#配置)
-- [部署](#部署)
-- [运维](#运维)
-- [文档](#文档)
-- [仓库结构](#仓库结构)
-- [开发](#开发)
+It targets this class of problem: many business systems need a single access point, contract changes need to be controlled, call chains need to be observable, and AI agents need to reach all of it through MCP — while business code keeps its own deployment, its own stack, and its own release cadence.
 
-## 产品特性
+## Table of contents
 
-| 特性 | 说明 |
+- [Features](#features)
+- [Why plugin-hub](#why-plugin-hub)
+- [Architecture](#architecture)
+- [Core concepts](#core-concepts)
+- [Quick start](#quick-start)
+- [Agent access (MCP)](#agent-access-mcp)
+- [HTTP API reference](#http-api-reference)
+- [Plugin development](#plugin-development)
+- [Configuration](#configuration)
+- [Deployment](#deployment)
+- [Operations](#operations)
+- [Documentation](#documentation)
+- [Repository structure](#repository-structure)
+- [Development](#development)
+
+## Features
+
+| Feature | What it means |
 |---|---|
-| **字段级契约治理** | 插件注册时提交 proto descriptor，中台做字段级兼容检查——新增可选字段放行，删字段 / 改类型 / 改编号拒绝。契约漂移在注册时就被拦下，而不是在运行时爆炸 |
-| **声明式编排** | DAG 流程：可视化编辑器拖拽连线，保存草稿 / 发布两段式，上下游消息全限定名对不上当场拦住 |
-| **同步 + 异步执行** | 同步链直返逐节点结果；异步链走 Redis Stream 总线，自带消费组、接管重投、死信与幂等 |
-| **MCP 工具面** | 内置 18 个工具，插件工具自动聚合（`插件名__工具名`），agent 拉一次 `tools/list` 即见全部能力 |
-| **实例级治理** | 每实例并发上限、熔断（跳闸 / 半开探测）、连续失败计数；实例下线后其工具同步从 MCP 消失 |
-| **全链路可观测** | W3C trace 传播、span 落库、可选 OTLP 导出、调用链瀑布图 |
-| **多语言 SDK** | Go / Python / Node / Rust / C# 五门，脚手架模板一键下载，包内自带 SDK 源码 |
-| **鉴权插件化** | 中台内不含鉴权逻辑；由鉴权插件回答「这个凭证有哪几个权限位」，中台只认权限位 |
+| **Field-level contract governance** | Plugins submit a proto descriptor at registration; the hub runs field-level compatibility checks — adding an optional field passes, deleting a field / changing a type / renumbering a tag is rejected. Contract drift is stopped at registration time, not at runtime. |
+| **Declarative orchestration** | DAG flows: drag-and-drop wiring in the visual editor, two-phase draft / publish, and mismatched fully-qualified names between upstream and downstream are caught on the spot |
+| **Sync + async execution** | Sync chains return per-node results directly; async chains run over the Redis Stream bus with consumer groups, takeover redelivery, dead letters, and idempotency built in |
+| **MCP tool surface** | 18 built-in tools; plugin tools aggregate automatically (`plugin__tool`); an agent pulls `tools/list` once and sees every capability |
+| **Instance-level governance** | Per-instance concurrency caps, circuit breaking (trip / half-open probing), consecutive-failure counts; when an instance goes offline, its tools disappear from MCP too |
+| **End-to-end observability** | W3C trace propagation, spans persisted to the database, optional OTLP export, call-chain waterfall views |
+| **Multi-language SDKs** | Go / Python / Node / Rust / C# — five SDKs, scaffold templates one command away, with the SDK sources bundled into the generated project |
+| **Pluggable auth** | The hub contains no auth logic; an auth plugin answers "which permission bits does this credential hold", and the hub only recognizes bits |
 
-## 架构
+## Why plugin-hub
 
-```
-        hub.example.com（TLS）· <host-ip>（MCP 直连）          插件（任意主机）
-                        │                                              │
-        ┌───────────────┼───────────────┐                              │
-        │ :8081 HTTPS   │ :8096 HTTP    │ :8094 TLS http2              │
-        │ 控制台同源面   │ MCP IP 直连    │ 插件面 gRPC（TLS 终结）        │
-        ▼               ▼               ▼                              │
-     nginx ──127.0.0.1:8095──▶  plugin-hub  ◀──────── grpc_pass ────────┘
-                                    │        （转发至 0.0.0.0:8093）
-                     ┌──────────────┴──────────────┐
-                     ▼                             ▼
-         PostgreSQL（plugin_hub 库，:55432）  Redis Stream（db /2，:56380）
-```
-
-| 面 | 中台监听 | 对外 | 承载 |
+| Alternative | What it is | Where it falls short for "unified access + AI dispatch across systems" | When you should still pick it |
 |---|---|---|---|
-| HTTP 面 | `127.0.0.1:8095` | nginx `/hub-api/`（与控制台同源）、`/mcp` | Ingress / Admin / MCP / 健康 / 指标 |
-| 插件面 | `0.0.0.0:8093`（gRPC） | nginx `8094 ssl http2` | 注册 / 心跳 / 回调 |
-| 运维面 | unix socket | 容器内 `hubctl` | 主机面救生通道 |
+| In-process plugin mechanisms (DI containers, hook registries) | Plugins live inside your service's own process | Shared fate with the host: adding a capability means redeploying the host; a single language stack; contract drift is at best caught in review | One team, one language, a single deployable is all you need |
+| API-gateway plugin ecosystems (Kong, APISIX, …) | Plugins extend the gateway's traffic path | Built for the data plane (authn, rate limiting, rewriting); hosting business capabilities and orchestrating across them is not the model | Your extension point really is HTTP traffic |
+| One MCP server per system | Each system exposes its own MCP surface | Agents must wire up N surfaces; no cross-system contract enforcement, no unified orchestration or tracing | You have exactly one system |
 
-设计要点：
+The trade is explicit: you run one more hub (compose brings PostgreSQL / Redis with it) plus plugins as separate processes, and in exchange you get cross-system contract checks at registration, cross-plugin orchestration, a single aggregated MCP surface, and unified observability.
 
-- **插件与中台不要求同机**。插件自注册时上报自己的可达地址，中台**注册时即做可达性探测**，探不通直接拒绝——避免「注册成功但永远调不通」。
-- **HTTP 面只绑回环**，对外一律经 nginx：与控制台同源（零跨域、SSO Cookie 天然携带），TLS 与限流收口在 nginx。
-- **依赖自带**：PostgreSQL 与 Redis 由 compose 编排提供（非默认端口，避免与同机其他服务相争），见[部署](#部署)。
+## Architecture
 
-### 技术栈
+```
+     hub.example.com (TLS) · <host-ip> (direct MCP)        plugins (any host)
+                     │                                          │
+     ┌───────────────┼───────────────┐                          │
+     │ :8081 HTTPS   │ :8096 HTTP    │ :8094 TLS http2          │
+     │ console       │ MCP direct    │ plugin gRPC (TLS term.)  │
+     │ (same-origin) │               │                          │
+     ▼               ▼               ▼                          │
+  nginx ──127.0.0.1:8095──▶  plugin-hub  ◀──────── grpc_pass ────┘
+                                 │      (forwards to 0.0.0.0:8093)
+                  ┌──────────────┴──────────────┐
+                  ▼                             ▼
+      PostgreSQL (db plugin_hub, :55432)  Redis Stream (db /2, :56380)
+```
 
-| 层 | 选型 |
+| Face | Hub listens on | Exposed via | Carries |
+|---|---|---|---|
+| HTTP face | `127.0.0.1:8095` | nginx `/hub-api/` (same origin as the console), `/mcp` | Ingress / Admin / MCP / health / metrics |
+| Plugin face | `0.0.0.0:8093` (gRPC) | nginx `8094 ssl http2` | Registration / heartbeat / callbacks |
+| Ops face | unix socket | `hubctl` inside the container | Host-side lifeline |
+
+Design notes:
+
+- **Plugins and the hub do not need to share a machine.** Self-registering plugins report their own reachable address, and the hub **probes reachability at registration** — unreachable addresses are rejected outright, avoiding "registered successfully but never callable".
+- **The HTTP face binds loopback only**; everything external goes through nginx: same origin as the console (zero CORS, SSO cookies carried naturally), with TLS and rate limiting consolidated there.
+- **Dependencies are bundled**: PostgreSQL and Redis are provisioned by compose (non-default ports, to avoid fights with other services on the same host) — see [Deployment](#deployment).
+
+### Tech stack
+
+| Layer | Choice |
 |---|---|
-| 中台 | Rust：axum + tonic + sqlx + PostgreSQL + redis-rs + tracing + metrics-exporter-prometheus |
-| 插件 SDK | Go（默认）；契约由 protobuf 定义，任意语言可实现 |
-| 控制台 | Vue 3 + Element Plus + Vue Flow（另仓实现），由 nginx 静态 serve |
+| Hub | Rust: axum + tonic + sqlx + PostgreSQL + redis-rs + tracing + metrics-exporter-prometheus |
+| Plugin SDK | Go (default); contracts are protobuf, implementable in any language |
+| Console | Vue 3 + Element Plus + Vue Flow (built in a separate repo), served statically by nginx |
 
-### 控制台
+### Console
 
-配套的 Web 控制台（另仓实现）与中台 HTTP 面同源部署，共十一个页面（十个菜单项 + 从列表点进去的流程拓扑）：
+The companion web console (separate repo) is deployed same-origin with the hub's HTTP face — eleven pages (ten menu items plus the flow topology you reach from the list):
 
-| 页面 | 内容 |
+| Page | Contents |
 |---|---|
-| 插件目录 | 插件 / 版本 / 契约 / MCP 工具 / 实例，含契约影响面（改字段前先看两端） |
-| 实例健康 | 已注册实例、心跳新鲜度、自报地址（跨机插件一眼可辨） |
-| 编排流程 + 拓扑 | DAG 渲染、草稿/已发布/历史修订切换、校验问题在图上标红 |
-| 编排编辑器 | 加节点、拖动连线、节点属性、即时本地校验、保存草稿、发布 |
-| 执行记录 + 详情 | 状态 / 耗时 / 失败原因、节点耗时条、逐节点明细 |
-| 调用链 + 瀑布图 | 按 `parent_span_id` 建树、缩进与时间轴对齐 |
-| 死信 | 查看与重放 |
-| 触发器 | cron / MQ 的登记、启停、删除 |
-| 治理 | 并发占用、熔断状态、连续失败、累计放行 |
-| 版本升级 | 找出锁在旧版本上的节点——灰度升级的操作台 |
+| Plugin catalog | Plugins / versions / contracts / MCP tools / instances, with contract impact (see both ends before changing a field) |
+| Instance health | Registered instances, heartbeat freshness, self-reported addresses (cross-machine plugins recognizable at a glance) |
+| Flows + topology | DAG rendering, draft / published / revision history toggles, validation issues marked red on the graph |
+| Flow editor | Add nodes, drag wires, node properties, instant local validation, save draft, publish |
+| Runs + details | Status / duration / failure reason, per-node duration bars, node-level detail |
+| Traces + waterfall | Tree built from `parent_span_id`, indented and time-axis aligned |
+| Dead letters | Inspection and replay |
+| Triggers | Register, enable/disable, delete cron / MQ triggers |
+| Governance | Concurrency usage, breaker state, consecutive failures, cumulative admissions |
+| Version upgrades | Find the nodes still pinned to old versions — the operations desk for rolling upgrades |
 
-## 核心概念
+## Core concepts
 
-### 插件模型
+### The plugin model
 
-每个插件必须提供两部分，缺一不可：
+Every plugin must provide two parts — neither is optional:
 
-1. **插件体**（`Handle`）——自主实现的数据输入输出；
-2. **数据校验器**（`Validate`）——数据进入中台后先经校验器，通过后才进插件体。
+1. **The plugin body** (`Handle`) — the data in/out logic you own;
+2. **The data validator** (`Validate`) — data entering the hub passes the validator first; only then does it reach the plugin body.
 
-插件在 manifest 中声明消费 / 生产的消息类型与 MCP 工具，中台据此完成三件事：注册时做字段级兼容检查；保存编排时校验上下游消息能否对接；把插件能力聚合进 MCP 工具面。
+Plugins declare the messages they consume/produce and their MCP tools in the manifest; the hub uses that for three things: field-level compatibility checks at registration, upstream/downstream message matching validation when flows are saved, and aggregating plugin capabilities into the MCP tool surface.
 
-### 编排与执行
+### Orchestration and execution
 
-- 流程是 DAG，**草稿 / 发布两段式**：保存草稿永远不会被拒（返回 `blocked` 与 `issues` 供修正），发布前重新校验、有阻断问题才拒绝——把「编辑的自由」和「生效的严肃」分开。
-- **同步触发**返回逐节点结果；**异步触发**入总线队列立刻返回句柄（202），由常驻消费者执行，失败自动接管重投，超过投递上限进死信，可在控制台查看与重放。
+- Flows are DAGs with a **two-phase draft / publish** lifecycle: saving a draft is never rejected (it returns `blocked` with `issues` so you can fix them), while publishing re-validates and refuses only on blocking issues — separating "freedom to edit" from "seriousness of taking effect".
+- **Sync triggers** return per-node results; **async triggers** enqueue on the bus and return a handle immediately (202). A resident consumer executes them, failures are taken over and redelivered automatically, and deliveries past the limit land in dead letters — inspectable and replayable from the console.
 
-### MCP 工具面
+### The MCP tool surface
 
-`POST /mcp`，Streamable HTTP，供 agent 使用。
+`POST /mcp`, Streamable HTTP, for agents.
 
-| 类别 | 工具 |
+| Category | Tools |
 |---|---|
-| 插件目录 | `list_plugins` · `get_plugin` · `list_instances` |
-| 排障 | `list_register_rejections`（最近的注册拒绝：谁被拒、原因、重试次数） |
-| 能力调用 | `invoke_plugin`（载荷先过插件校验器，通过才进插件体） |
-| 编排 | `list_flows` · `get_flow` · `save_flow_draft` · `trigger_flow` · `trigger_flow_async` |
-| 执行与追踪 | `list_runs` · `get_run` · `list_traces` · `get_trace` |
+| Plugin catalog | `list_plugins` · `get_plugin` · `list_instances` |
+| Troubleshooting | `list_register_rejections` (recent registration rejections: who, why, how many retries) |
+| Capability invocation | `invoke_plugin` (payloads pass the plugin validator first; the plugin body only runs after it passes) |
+| Orchestration | `list_flows` · `get_flow` · `save_flow_draft` · `trigger_flow` · `trigger_flow_async` |
+| Runs and traces | `list_runs` · `get_run` · `list_traces` · `get_trace` |
 
-### 实例级治理
+### Instance-level governance
 
-治理快照提供每实例的并发占用、熔断状态、连续失败与累计放行。注意口径：快照按**被调用过**建项——刚注册未调用的实例不在里面，已下线但留有失败计数的实例会保留（否则失败计数凭空归零）。判断「谁在线」用 `/admin/instances`。
+The governance snapshot provides per-instance concurrency usage, breaker state, consecutive failures, and cumulative admissions. Note the accounting rule: entries are created **once a plugin has been invoked** — freshly registered instances that were never invoked are not in it, and instances that went offline but carry failure counts are kept (otherwise counts would silently reset to zero). To ask "who is online", use `/admin/instances`.
 
-### 管理面鉴权
+### Admin-face authentication
 
-中台内部不含鉴权逻辑，由插件承担。配置 `HUB_AUTH_PLUGIN`（插件名）后，管理面每个请求都会先问该插件：**这个凭证是谁、有哪几个权限位**。中台定义权限位，插件回答「有哪几个」——谁是管理员是平台权限体系的事，不在中台再抄一份。
+The hub contains no auth logic by design; plugins carry it. Once `HUB_AUTH_PLUGIN` (a plugin name) is configured, every admin-face request first asks that plugin: **who is this credential, and which permission bits does it hold**. The hub defines the permission bits; the plugin answers "which ones" — who counts as an admin is a matter of your platform's permission system, not something the hub re-implements.
 
-| 权限位 | 管什么 |
+| Permission bit | Governs |
 |---|---|
-| `hub:read` | 插件目录、编排定义、执行记录、调用链、死信列表、触发器列表 |
-| `hub:invoke` | 触发编排、调 MCP 工具（会产生真实副作用） |
-| `hub:edit` | 保存草稿、登记触发器（改的是未生效的那一份） |
-| `hub:publish` | 发布（把草稿推成生产流量走的那一版） |
-| `hub:admin` | 治理快照、死信重放、删除触发器 |
+| `hub:read` | Plugin catalog, flow definitions, run records, traces, dead-letter list, trigger list |
+| `hub:invoke` | Triggering flows, invoking MCP tools (real side effects) |
+| `hub:edit` | Saving drafts, registering triggers (edits to the not-yet-effective copy) |
+| `hub:publish` | Publishing (pushing a draft to the version production traffic runs on) |
+| `hub:admin` | Governance snapshot, dead-letter replay, trigger deletion |
 
-> 发布与改草稿是**两位**：并成一位等于让所有编辑者都能发布。
+> Publishing and editing drafts are **two bits**: merging them means every editor can publish.
 
-三条路径不受鉴权影响：`/health` 与 `/metrics`（中台是否存活不应需要凭证才能回答）、`/ingress`（鉴权按设计由插件自己承担）、`/blobs`（ingress 的延伸）。两条安全底线：**插件不可达时返回 503，绝不降级成匿名放行**；认不出来的路径交给 404 而不是凭空发明权限位——把「路径写错」表现成 403 会把真问题藏起来。
+Three paths are unaffected by auth: `/health` and `/metrics` (whether the hub is alive should not require credentials to answer), `/ingress` (auth is, by design, the plugin's own job), and `/blobs` (an extension of ingress). Two safety baselines: **when the auth plugin is unreachable, return 503 — never degrade to anonymous allow**; and unrecognized paths get a 404 instead of an invented permission bit — turning "typo in the path" into a 403 would hide the real problem.
 
-鉴权插件的实现要点：实现标准插件协议（`Validate` / `Handle`），在 `Handle` 里读凭证、查权限位、把权限位写回信封 meta 即可，参考 [docs/plugin-onboarding.md](docs/plugin-onboarding.md) 与 [examples/ping-chain](examples/ping-chain/)。
+Implementation notes for auth plugins: implement the standard plugin protocol (`Validate` / `Handle`), read the credential in `Handle`, look up the permission bits, and write them back into the envelope meta. See [docs/plugin-onboarding.md](docs/plugin-onboarding.md) and [examples/ping-chain](examples/ping-chain/).
 
-## 快速开始
+## Quick start
 
-前提：Rust stable（见 `rust-toolchain.toml`）、Docker（本地 PG / Redis）。
+Prerequisites: Rust stable (see `rust-toolchain.toml`), Docker (for local PostgreSQL / Redis).
 
-**1. 启动中台**（`DATABASE_URL` / `REDIS_URL` 缺一会拒绝启动；启动时自动跑数据库迁移）：
+**1. Start the hub** (startup is refused if `DATABASE_URL` / `REDIS_URL` is missing; database migrations run automatically at boot):
 
 ```bash
 DATABASE_URL=postgresql://u:p@127.0.0.1:5432/plugin_hub \
@@ -151,25 +167,27 @@ HUB_HTTP_PORT=8092 \
 cargo run -p hub-server
 ```
 
-**2. 创建第一个插件**：
+Once it is up, `curl http://127.0.0.1:8092/health` should return `{"ok":true,...}`.
+
+**2. Create your first plugin**:
 
 ```bash
 cd sdk/go
 go run ./cmd/hub-plugin new order-reader --dir /tmp/order-reader
 ```
 
-工程内含源码骨架、接入指南（含「接入四道关」）、契约一致性测试与随包 SDK 源码，拿到手即可构建运行。
+The generated project contains the source skeleton, an onboarding guide (including the "four gates" of integration), a contract-consistency test, and the bundled SDK sources — ready to build and run as delivered.
 
-> 首次 `go mod tidy` 需访问 Go 代理：`export GOPROXY=https://goproxy.cn,direct`；解析过一次之后不再需要网络。
+> The first `go mod tidy` needs a Go proxy: `export GOPROXY=https://goproxy.cn,direct`; once resolved, no network is needed afterwards.
 
-**3. 实现两个方法并注册**（`hubkit.Run` 处理 gRPC 服务、自注册、心跳、被摘除后自愈与优雅退出）：
+**3. Implement two methods and register** (`hubkit.Run` handles the gRPC server, self-registration, heartbeat, self-healing after removal, and graceful shutdown):
 
 ```go
 func (p *Plugin) Validate(ctx context.Context, env *hubv1.Envelope) (*hubv1.ValidateResponse, error)
 func (p *Plugin) Handle(ctx context.Context, env *hubv1.Envelope) (*hubv1.Envelope, error)
 ```
 
-**4. 调用它**：
+**4. Call it**:
 
 ```bash
 curl -X POST http://127.0.0.1:8092/ingress/order-reader \
@@ -177,175 +195,190 @@ curl -X POST http://127.0.0.1:8092/ingress/order-reader \
   -d '{"payload": {"order_id": "SO-123"}}'
 ```
 
-完整接入流程见 [docs/plugin-onboarding.md](docs/plugin-onboarding.md)；两个插件互相发现与调用的可运行示例见 [examples/ping-chain](examples/ping-chain/)。
+Expected response (200; fields match the hub's `IngressResponse`; `payload` is whatever the plugin's `Handle` returned):
 
-## Agent 接入（MCP）
+```json
+{
+  "message_id": "01JBF3Z9X2M5Q7W8R4T6Y8U0VW",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "plugin": "order-reader",
+  "version": "0.1.0",
+  "instance_id": "myhost-4123",
+  "elapsed_ms": 9,
+  "payload": { "…": "the JSON payload returned by the plugin's Handle" }
+}
+```
 
-MCP 为 HTTP 传输。本地开发连 `http://127.0.0.1:8092/mcp`；生产经 nginx 对外是 `https://hub.example.com/mcp`（同源面）或 `http://<host-ip>:8096/mcp`（IP 直连面）。
+The full onboarding walkthrough is in [docs/plugin-onboarding.md](docs/plugin-onboarding.md); for a runnable example of two plugins discovering and calling each other, see [examples/ping-chain](examples/ping-chain/).
 
-客户端配置示例（Claude CLI：`claude mcp add --transport http --scope user plugin-hub <url>`；ZCode：`~/.zcode/cli/config.json`）：
+## Agent access (MCP)
+
+MCP is served over HTTP. For local development connect to `http://127.0.0.1:8092/mcp`; in production via nginx it is `https://hub.example.com/mcp` (same-origin face) or `http://<host-ip>:8096/mcp` (direct-IP face).
+
+Client configuration example (Claude CLI: `claude mcp add --transport http --scope user plugin-hub <url>`; ZCode: `~/.zcode/cli/config.json`):
 
 ```json
 { "type": "http", "url": "http://127.0.0.1:8092/mcp" }
 ```
 
-服务端有 DNS rebinding 防护（rmcp Host 白名单），经 nginx 对外时必须配置 `HUB_MCP_ALLOWED_HOSTS`（**一旦配置即替换默认的回环放行**，回环需显式列出）。若返回 `403 Forbidden: Host header is not allowed`，把客户端使用的 Host 加入白名单并重启容器。
+The server ships DNS-rebinding protection (rmcp Host allowlist). When exposing via nginx you must configure `HUB_MCP_ALLOWED_HOSTS` (**once set it replaces the default loopback allowlist — list loopback explicitly if you still need it**). If you get `403 Forbidden: Host header is not allowed`, add the Host your client uses to the allowlist and restart the container.
 
-## HTTP API 参考
+## HTTP API reference
 
-**业务数据入口**（不鉴权——鉴权由插件承担）：
+**Business data entry** (no auth — auth is the plugins' job):
 
 ```
-POST /ingress/{plugin}         载荷 JSON 对象 → 包成 google.protobuf.Struct 送入插件
+POST /ingress/{plugin}         JSON object payload → wrapped into a google.protobuf.Struct and delivered to the plugin
   { "payload": {...}, "message_id"?: "...", "version"?: "...", "meta"?: {...}, "timeout_ms"?: 30000 }
 → 200 { plugin, version, instance_id, elapsed_ms, payload | payload_type_url + payload_base64 }
-→ 422 校验器拒绝（带 issues）    → 404 插件未注册    → 502 插件不可达/超时
+→ 422 validator rejected (with issues)    → 404 plugin not registered    → 502 plugin unreachable / timed out
 ```
 
-> **大载荷引用通道**：载荷超过 4MB 时不内联，响应改给 `payload_ref`（uri + sha256 + 大小），插件收到的信封里只有 uri；`GET /blobs/{id}` 取回内容，带 TTL（默认 1 小时）。请求体硬上限 8MB——必须大于内联上限，否则引用通道够不着；超限在 handler 之前就被挡成 413。
+> **Large-payload reference channel**: payloads over 4MB are not inlined; the response carries `payload_ref` (uri + sha256 + size) instead, and the envelope the plugin receives contains only the uri. Fetch content back with `GET /blobs/{id}`, TTL-bounded (1 hour by default). The request body hard limit is 8MB — it must exceed the inline cap, otherwise the reference channel could never be reached; over-limit requests are rejected with 413 before the handler runs.
 
-**管理面**（按设计不带中台内置守卫；配 `HUB_AUTH_PLUGIN` 后由插件承担鉴权）：
+**Admin face** (no built-in hub guard by design; with `HUB_AUTH_PLUGIN` set, auth is the plugin's job):
 
 ```
-GET  /admin/plugins              插件列表（含版本数、在线实例数）
-GET  /admin/plugins/{name}       插件详情：逐版本的契约、MCP 工具、实例
-GET  /admin/instances            全部在线实例
-GET  /admin/rejections           最近的注册拒绝留痕（谁被拒、拒绝码、原因、重试次数）
-                                 ?plugin=<按插件过滤>&limit=<1..200，默认 50>
-GET  /admin/messages/{fq_name}   某消息类型被谁生产、被谁消费（改契约前的影响面）
-GET  /admin/governance           实例级治理快照（口径说明见「实例级治理」）
+GET  /admin/plugins              plugin list (with version count, live instance count)
+GET  /admin/plugins/{name}       plugin detail: per-version contracts, MCP tools, instances
+GET  /admin/instances            all live instances
+GET  /admin/rejections           recent registration rejections (who, code, reason, retries)
+                                 ?plugin=<filter by plugin>&limit=<1..200, default 50>
+GET  /admin/messages/{fq_name}   who produces and who consumes a message type (impact check before contract edits)
+GET  /admin/governance           instance-level governance snapshot (see "Instance-level governance" for the accounting)
 DELETE /admin/plugins/{name}/versions/{version}
-                                 删除已登记版本（VERSION_CONFLICT / BREAKING_CHANGE
-                                 拒死后的恢复操作；级联删契约、工具与实例，不可逆，
-                                 随后清掉该插件的拒绝留痕）——与主机面 hubctl
-                                 remove-version 同一条 store 路径
-GET  /health  GET /metrics       探活与指标（不依赖数据库）
+                                 delete a registered version (recovery after VERSION_CONFLICT / BREAKING_CHANGE
+                                 dead-ends; cascades to contracts, tools, and instances; irreversible;
+                                 also clears the plugin's rejection records) — same store path as the
+                                 host-face `hubctl remove-version`
+GET  /health  GET /metrics       liveness and metrics (does not depend on the database)
 ```
 
-**插件脚手架模板**（不鉴权——是开发资料而非运行数据）：
+**Plugin scaffold templates** (no auth — developer material, not runtime data):
 
 ```
-GET  /plugin-templates                      有哪几门语言的模板（含构建时间、文件数、包大小）
-GET  /plugin-templates/{lang}/download      下载一份可运行的插件工程（zip）
-                ?name=<插件名>&package=<包名可选>
+GET  /plugin-templates                      which language templates exist (with build time, file count, package size)
+GET  /plugin-templates/{lang}/download      download a runnable plugin project (zip)
+                ?name=<plugin name>&package=<package name, optional>
 ```
 
-`name` 用与注册期同一条规则校验（`hub-registry` 同一函数），页面放行的名字注册时一定也放行；模板内容在编译期嵌进中台二进制（`crates/hub-templates`）。
+`name` is validated by the same rule as registration (the same function in `hub-registry`), so a name the download page accepts is guaranteed to be accepted at registration. Template contents are embedded into the hub binary at compile time (`crates/hub-templates`).
 
-**编排**：
-
-```
-GET  /flows                      流程列表：发布版本、修订数、是否有草稿
-GET  /flows/{flow}               流程全貌：草稿、已发布版本、历史修订
-POST /flows/{flow}/draft         保存草稿（保存不会被拒，返回 blocked 与 issues）
-POST /flows/{flow}/publish       发布（发布前重新校验，有阻断问题则拒）
-POST /flows/{flow}/trigger       同步触发，返回逐节点结果
-GET  /runs  GET /runs/{run_id}   执行记录与逐节点明细
-GET  /traces  GET /traces/{id}   调用链（按 trace 聚合，不按 span 铺开）
-```
-
-**异步与总线**：
+**Orchestration**:
 
 ```
-POST /flows/{flow}/trigger-async 入队一次异步执行，立刻返回句柄（202）
-GET  /dead-letters               死信列表（默认只看没重放过的）
-GET  /dead-letters/{id}          死信详情
-POST /dead-letters/{id}/replay   重放（载荷必须由调用方提供——死信里只有摘要）
-GET  /triggers                   触发器列表（含已停用的，停用的排前面）
-POST /flows/{flow}/triggers      登记或更新一条 cron / mq 触发器
-POST /triggers/{id}/enabled      启用 / 停用
-DELETE /triggers/{id}            删除
+GET  /flows                      flow list: published version, revision count, has-draft flag
+GET  /flows/{flow}               flow in full: draft, published version, revision history
+POST /flows/{flow}/draft         save draft (saving is never refused; returns blocked with issues)
+POST /flows/{flow}/publish       publish (re-validates first; refuses on blocking issues)
+POST /flows/{flow}/trigger       sync trigger, returns per-node results
+GET  /runs  GET /runs/{run_id}   run records and per-node detail
+GET  /traces  GET /traces/{id}   call chains (aggregated per trace, not flattened per span)
 ```
 
-## 插件开发
+**Async and the bus**:
 
-### SDK 一览
+```
+POST /flows/{flow}/trigger-async enqueue one async execution, returns a handle immediately (202)
+GET  /dead-letters               dead-letter list (only not-yet-replayed by default)
+GET  /dead-letters/{id}          dead-letter detail
+POST /dead-letters/{id}/replay   replay (the caller must supply the payload — dead letters keep only a summary)
+GET  /triggers                   trigger list (including disabled ones, disabled first)
+POST /flows/{flow}/triggers      register or update a cron / mq trigger
+POST /triggers/{id}/enabled      enable / disable
+DELETE /triggers/{id}            delete
+```
 
-**五门：Go / Python / Node / Rust / C#**，位于 `sdk/<语言>/`，各带一套脚手架模板（下载接口下发的就是它们）。清单与用法见各门 `README.md`。
+## Plugin development
 
-> 插件之间要**互相发现、互相调用**，走中台的 `PluginGateway`（A→hub→B，不直连）：SDK 用法、`invokes` 权限声明与限额/防环行为见 [docs/plugin-onboarding.md](docs/plugin-onboarding.md) 的「插件互调与发现」，可运行的双插件示例在 [examples/ping-chain](examples/ping-chain/)。
+### SDK overview
 
-以下以 Go 为例（其余四门行为对齐它）：
+**Five: Go / Python / Node / Rust / C#**, under `sdk/<language>/`, each with a scaffold template (what the download endpoint serves). See each SDK's `README.md` for the inventory and usage.
+
+> Plugins that need to **discover and call each other** go through the hub's `PluginGateway` (A→hub→B, never direct): SDK usage, `invokes` permission declarations, and quota / cycle-prevention behavior are in the "Plugin-to-plugin calls and discovery" section of [docs/plugin-onboarding.md](docs/plugin-onboarding.md); the runnable two-plugin example is in [examples/ping-chain](examples/ping-chain/).
+
+Go as the example (the other four align with it):
 
 ```bash
 cd sdk/go
 go run ./cmd/hub-plugin new order-reader --dir /tmp/order-reader
 ```
 
-`sdk/go/` 六件套齐备：服务端骨架、契约定义（生成产物已提交，**不需要装 protoc**）、脚手架、mock 中台、契约一致性自检、调试工具。生成的插件用 `google.protobuf.Struct` 承载 JSON 载荷。
+`sdk/go/` ships the full six-piece set: server skeleton, contract definitions (generated artifacts are committed — **no protoc needed**), scaffold, mock hub, contract-consistency self-check, and debugging tools. Generated plugins carry JSON payloads in `google.protobuf.Struct`.
 
-### 插件协议
+### The plugin protocol
 
-插件必须实现 `hub.v1.PluginRuntime`：`Describe` / `Validate` / `Handle` / `HandleStream` / `Health`，并向 `hub.v1.PluginRegistry` 自注册（上报可达地址、manifest、FileDescriptorSet），此后按中台指定周期发心跳。完整定义见 `crates/hub-proto/proto/hub/v1/`。
+Plugins implement `hub.v1.PluginRuntime`: `Describe` / `Validate` / `Handle` / `HandleStream` / `Health`, and self-register with `hub.v1.PluginRegistry` (reporting their reachable address, manifest, and FileDescriptorSet), then heartbeat on the hub-directed schedule. Full definitions in `crates/hub-proto/proto/hub/v1/`.
 
-### 插件侧约定
+### Plugin-side conventions
 
-1. **中台上报的地址必须能被中台拨通**——注册时做可达性探测，探不通直接拒。
-2. **校验器先行**——中台一定先调 `Validate`，通过才调 `Handle`；不通过则插件体零执行。
-3. **强制无状态**——实例内存不保证跨调用保留；换来热切换零代价、可水平扩展。
-4. **契约不可漂移**——同版本号的 manifest 与 proto 不可变更，改了请升版本号。
-5. **HubState 的键前缀不含版本号**——键为 `hub:state:{插件名}:{namespace}:{key}`，同插件所有版本共用一个状态空间：升版本不清空状态（登录缓存这类正是要的），但两个版本写同一个 `namespace` 就是互相覆盖；要按版本隔离，把版本写进 `namespace`。
-6. **`HubState.Publish` 的 subject 由中台覆盖**——信封的 `subject` 无条件换成插件身份（`kind=PLUGIN`、`id=插件名`），下游据此做的审计与二次确认全建立在这一条上。`target` 当前只认**已发布的 flow 名**（topic 订阅尚未实现）。三道闸以 `accepted: false` + `reason` 返回（**不是 gRPC 错误**，插件该改逻辑而不是重试）：**成环**（本次触发链上已有该目标）、**链过长**（8 跳）、**配额**（每插件每分钟 60 次，按插件隔离）；总线或数据库故障才是 gRPC 错误。
+1. **The address reported to the hub must be dialable by the hub** — reachability is probed at registration; unreachable addresses are rejected outright.
+2. **Validator first** — the hub always calls `Validate` before `Handle`; on failure the plugin body runs zero times.
+3. **Stateless by force** — in-memory instance state is not guaranteed to survive across calls; in exchange, hot swaps are free and horizontal scaling is trivial.
+4. **Contracts may not drift** — a manifest and proto under the same version number are immutable; change them by bumping the version.
+5. **HubState keys do not contain the version number** — keys are `hub:state:{plugin}:{namespace}:{key}`, so all versions of a plugin share one state space: upgrading does not clear state (exactly what you want for login caches), but two versions writing the same `namespace` overwrite each other; to isolate per version, put the version into the `namespace`.
+6. **The subject of `HubState.Publish` is overwritten by the hub** — the envelope's `subject` is unconditionally replaced with the plugin identity (`kind=PLUGIN`, `id=plugin name`); downstream audits and double-confirmations are built on this. `target` currently only accepts **published flow names** (topic subscriptions are not implemented yet). The three gates respond with `accepted: false` + `reason` (**not gRPC errors** — fix your logic, don't retry): **cycle** (this trigger chain already contains the target), **chain too long** (8 hops), **quota** (60 per minute per plugin, isolated per plugin); bus or database failures are the real gRPC errors.
 
-### 新增一门 SDK 语言
+### Adding an SDK language
 
-是**两件事**，量级差得很远：
+It is **two things**, of very different sizes:
 
-1. **接入机制**（小）——建模板目录，在 `crates/hub-templates` 的 `build.rs` 加一行；中台侧、下载接口、控制台页面自动跟上。
-2. **SDK 本身**（大）——一门语言里的独立小项目，要实现**自注册、心跳、被摘除后自愈、优雅退出**，工作量与可靠度单独算，不是「照着 Go 抄一遍」。
+1. **The mechanism** (small) — create a template directory, add one line to the `build.rs` in `crates/hub-templates`; the hub side, the download endpoint, and the console page follow automatically.
+2. **The SDK itself** (large) — an independent mini-project in that language implementing **self-registration, heartbeat, self-healing after removal, and graceful shutdown**; its effort and reliability are accounted separately, not "copy the Go one".
 
-## 配置
+## Configuration
 
-完整清单见 [`deploy/.env.example`](deploy/.env.example)（每项都有取值缘由）。
+The full list with rationale per item is in [`deploy/.env.example`](deploy/.env.example).
 
-**核心项**：
+**Core items**:
 
-| 变量 | 默认 | 说明 |
+| Variable | Default | Notes |
 |---|---|---|
-| `HUB_HTTP_HOST` / `HUB_HTTP_PORT` | `127.0.0.1` / `8095` | HTTP 面。生产固定绑回环，只经 nginx 对外；本地开发用 `8092` |
-| `HUB_GRPC_HOST` / `HUB_GRPC_PORT` | `0.0.0.0` / `8093` | 插件面。必须绑 `0.0.0.0`——插件可能在其他主机上 |
-| `HUB_MCP_ALLOWED_HOSTS` | 空（仅回环） | MCP Host 白名单，逗号分隔；经 nginx 对外**必须配**。一旦配置即替换默认回环放行，回环要显式列出 |
-| `HUB_AUTH_PLUGIN` | 空（不启用） | 承担管理面鉴权的插件名；启用前提是插件已部署，否则管理面谁都进不去 |
-| `PG_PASSWORD` / `REDIS_PASSWORD` | **必填** | 由 compose 拼进连接串。**用纯字母数字**（`openssl rand -hex 24`）：URL 保留字符会让连接串解析失败，`$` 会被 compose 插值吞掉 |
-| `OTLP_ENDPOINT` | 空（不导出） | span 已自存 PG，导出只是顺便推给外部 trace 后端 |
+| `HUB_HTTP_HOST` / `HUB_HTTP_PORT` | `127.0.0.1` / `8095` | HTTP face. Production binds loopback and exposes only via nginx; local development uses `8092` |
+| `HUB_GRPC_HOST` / `HUB_GRPC_PORT` | `0.0.0.0` / `8093` | Plugin face. Must bind `0.0.0.0` — plugins may be on other hosts |
+| `HUB_MCP_ALLOWED_HOSTS` | empty (loopback only) | MCP Host allowlist, comma-separated; **required** when exposed via nginx. Once set it replaces the default loopback allowlist — list loopback explicitly |
+| `HUB_AUTH_PLUGIN` | empty (disabled) | Name of the plugin carrying admin-face auth; prerequisite: the plugin is deployed, otherwise nobody gets into the admin face |
+| `PG_PASSWORD` / `REDIS_PASSWORD` | **required** | Composed into the connection strings by compose. **Use plain alphanumerics** (`openssl rand -hex 24`): URL-reserved characters break connection-string parsing, and `$` gets eaten by compose interpolation |
+| `OTLP_ENDPOINT` | empty (no export) | Spans are already persisted in PG; export just also pushes them to an external trace backend |
 
-**运行时调优项**（默认即合理值，压测后按需调整）：
+**Runtime tuning** (defaults are sane; adjust after load testing):
 
-| 分组 | 变量（默认值） |
+| Group | Variables (defaults) |
 |---|---|
-| 实例级治理 | `NODE_MAX_CONCURRENCY=32`（到顶背压快速失败）· `NODE_QUEUE_TIMEOUT_MS=100` · `BREAKER_FAILURE_THRESHOLD=5` · `BREAKER_COOLDOWN_SECS=10` |
-| 异步总线 | `ASYNC_WORKERS=4` · `BUS_MAX_DEPTH=100000`（到顶 429）· `BUS_MAX_DELIVERY=5`（用完进死信）· `BUS_CLAIM_MIN_IDLE_SECS=60` |
-| 数据留存 | `STREAM_RETENTION_HOURS=24` · `SPAN_RETENTION_DAYS=7` · `RUN_RETENTION_DAYS=90` · `AUDIT_RETENTION_DAYS=90` |
-| 运维 | `LOG_LEVEL=info` · `HUB_OPS_SOCKET=/run/plugin-hub/ops.sock` · `BOOTSTRAP_TOKEN`（首次配置引导凭据，留空不启用） |
+| Instance governance | `NODE_MAX_CONCURRENCY=32` (fail fast with backpressure at the cap) · `NODE_QUEUE_TIMEOUT_MS=100` · `BREAKER_FAILURE_THRESHOLD=5` · `BREAKER_COOLDOWN_SECS=10` |
+| Async bus | `ASYNC_WORKERS=4` · `BUS_MAX_DEPTH=100000` (429 at the cap) · `BUS_MAX_DELIVERY=5` (then dead letter) · `BUS_CLAIM_MIN_IDLE_SECS=60` |
+| Retention | `STREAM_RETENTION_HOURS=24` · `SPAN_RETENTION_DAYS=7` · `RUN_RETENTION_DAYS=90` · `AUDIT_RETENTION_DAYS=90` |
+| Ops | `LOG_LEVEL=info` · `HUB_OPS_SOCKET=/run/plugin-hub/ops.sock` · `BOOTSTRAP_TOKEN` (first-time provisioning credential; empty = disabled) |
 
-## 部署
+## Deployment
 
-依赖**自带**：PostgreSQL 与 Redis 由 `deploy/docker-compose.yml` 编排，与中台一同运行：
+Dependencies are **bundled**: PostgreSQL and Redis are orchestrated by `deploy/docker-compose.yml` and run alongside the hub:
 
-| | 镜像 | 端口 | 数据目录 |
+| | Image | Port | Data dir |
 |---|---|---|---|
 | PostgreSQL | `postgres:16-alpine` | 55432 | `./data/pg` |
 | Redis | `redis:7-alpine` | 56380 | `./data/redis` |
 
-端口刻意避开默认值（避免与同机其他服务相争）；连接串由 compose 从分量拼出，密码只在 `.env` 写一处；数据绑宿主机目录而非 named volume。
+Ports deliberately avoid the defaults (no fights with other services on the same host); connection strings are assembled from components by compose, passwords are written in exactly one place (`.env`), and data binds host directories rather than named volumes.
 
-**最小上线**：
+**Minimal launch**:
 
 ```bash
 git clone https://github.com/mahingbun-dev/plugin-hub && cd plugin-hub
-cp deploy/.env.example .env          # 至少填 PG_PASSWORD / REDIS_PASSWORD
+cp deploy/.env.example .env          # at minimum fill PG_PASSWORD / REDIS_PASSWORD
 docker compose -p plugin-hub -f deploy/docker-compose.yml --env-file .env up -d
 curl http://127.0.0.1:8095/health    # {"ok":true,...}
 ```
 
-**对外暴露**（生产形态）：
+**External exposure** (production shape):
 
-1. **nginx**：`deploy/nginx/hub-api-location.conf` 并入你的 HTTPS server 块（与控制台同源）；`plugin-hub-grpc.conf`（8094，插件面 TLS 终结）与 `plugin-hub-ip-mcp.conf`（8096，MCP IP 直连）放到 `/etc/nginx/conf.d/`，把 `server_name` 与证书路径改成你的，`nginx -t && nginx -s reload`。
-2. **跨机插件**：`.env` 里配 `HUB_PLUGIN_PUBLIC_ADDR=https://your-domain:8094`（插件自报地址的前缀），插件所在主机要能拨通它。
+1. **nginx**: merge `deploy/nginx/hub-api-location.conf` into your HTTPS server block (same origin as the console); put `plugin-hub-grpc.conf` (8094, plugin-face TLS termination) and `plugin-hub-ip-mcp.conf` (8096, MCP direct-IP) into `/etc/nginx/conf.d/`, point `server_name` and the cert paths at yours, then `nginx -t && nginx -s reload`.
+2. **Cross-machine plugins**: set `HUB_PLUGIN_PUBLIC_ADDR=https://your-domain:8094` in `.env` (the prefix for plugin-reported addresses); the plugin hosts must be able to dial it.
 
-### 备份与恢复
+### Backup and restore
 
-[`deploy/backup-pg.sh`](deploy/backup-pg.sh) 用容器自带 `pg_dump` 导出到备份目录，清理超过 `BACKUP_KEEP_DAYS`（默认 14）天的旧备份。装到宿主机 crontab：
+[`deploy/backup-pg.sh`](deploy/backup-pg.sh) exports with the container's own `pg_dump` into a backup directory and prunes backups older than `BACKUP_KEEP_DAYS` (default 14). Install it into the host crontab:
 
 ```bash
 sudo cp deploy/backup-pg.sh /opt/plugin-hub/ && sudo chmod +x /opt/plugin-hub/backup-pg.sh
@@ -357,90 +390,90 @@ PATH=/usr/local/bin:/usr/bin:/bin
 17 3 * * * /opt/plugin-hub/backup-pg.sh >> /opt/plugin-hub/backups/backup.log 2>&1
 ```
 
-> ⚠️ `PATH=` 首行不能省：docker 通常在 `/usr/local/bin`，而 cron 默认 PATH 只有 `/usr/bin:/bin`——少了它备份静默消失，唯一痕迹是 backup.log 里一行 `docker: command not found`。脚本自身也会检查 `docker` 并明确报错。
+> ⚠️ The leading `PATH=` line cannot be dropped: docker usually lives in `/usr/local/bin`, while cron's default PATH is only `/usr/bin:/bin` — without it backups silently disappear and the only trace is one `docker: command not found` line in backup.log. The script also checks for `docker` itself and errors out loud.
 
-**恢复**（备份带 `--clean --if-exists`，是覆盖式恢复）：
+**Restore** (backups carry `--clean --if-exists`, i.e. a clobbering restore):
 
 ```bash
 gunzip -c backups/plugin_hub-YYYYMMDD-HHMMSS.sql.gz \
   | docker exec -i plugin-hub-pg psql -U plugin_hub -d plugin_hub -p 55432
 ```
 
-> ⚠️ `-p 55432` 不能省：PG 在非默认端口上，unix socket 名随之是 `.s.PGSQL.55432`，`psql` 默认找 5432 的那个。
+> ⚠️ `-p 55432` cannot be dropped: PG sits on a non-default port, so the unix socket is named `.s.PGSQL.55432`, while `psql` looks for the 5432 one by default.
 
-## 运维
+## Operations
 
-### 主机面运维通道
+### Host-face ops channel
 
-管理面按设计全插件化，鉴权插件坏掉时靠这条通道救回：
+The admin face is fully pluginized by design; this channel is how you get back in when the auth plugin itself breaks:
 
 ```bash
 docker exec plugin-hub hubctl status
 docker exec plugin-hub hubctl list-plugins
-docker exec plugin-hub hubctl delete-plugin <name> --yes    # 不可逆，必须显式确认
+docker exec plugin-hub hubctl delete-plugin <name> --yes    # irreversible, explicit confirmation required
 ```
 
-### 排障速查
+### Troubleshooting quick reference
 
-| 症状 | 原因与处理 |
+| Symptom | Cause and fix |
 |---|---|
-| `/mcp` 返回 `403 Forbidden: Host header is not allowed` | 客户端 Host 不在 `HUB_MCP_ALLOWED_HOSTS`；加入后重建容器。注意白名单一旦配置即替换默认回环放行 |
-| 插件注册成功但调用 502 | 自报地址不可达；检查 advertise 地址、容器网络与防火墙。注册时的可达性探测未过根本注册不上 |
-| 中台启动报 `invalid port number` | `PG_PASSWORD` 含 URL 保留字符（`/` `#` `?`），被拼进连接串所致；改用纯十六进制密码 |
-| 两个插件互相顶掉、工具面缺一半 | `*_INSTANCE_ID` 相同（缺省「主机名-PID」在 host 网络下必然撞）；每个实例配不同的显式 instance_id |
-| 插件容器 Up 但实例 0 个、工具面缺一门（看容器日志每 5 秒 `VERSION_CONFLICT` 重试） | 改了 manifest / 工具描述 / input schema 但 `PLUGIN_VERSION` 没升——同版本号必须契约一致。正确修法是升版本号重新构建发布；应急可用 `DELETE /admin/plugins/{name}/versions/{version}`（或 `hubctl remove-version`）删旧登记让插件重新注册。拒绝原因在 `GET /admin/rejections` 与 MCP 工具 `list_register_rejections` 里可查 |
-| cron 备份静默不再产出 | cron 默认 PATH 找不到 docker；crontab 首行补 `PATH=`，看 backup.log |
-| 恢复时 `No such file or directory` | `psql` 默认找 5432 的 socket；补 `-p 55432` |
-| 某些网络路径下 Go 插件 TLS 握手被重置（同路径 curl 正常） | 中间设备重置 TLS 1.3 握手；SDK 提供 `HUB_TLS_MAX_VERSION` 逃生口 |
-| Go 在 macOS 上自签 CA 不生效 | Go 不读 `SSL_CERT_FILE`（走 Keychain）；跨机自测跑 Linux 容器 |
+| `/mcp` returns `403 Forbidden: Host header is not allowed` | Client Host not in `HUB_MCP_ALLOWED_HOSTS`; add it and recreate the container. Note the allowlist replaces the default loopback allowlist once set |
+| Plugin registered fine but calls return 502 | Self-reported address unreachable; check the advertise address, container networking, and firewall. If the registration-time reachability probe had failed, it would never have registered |
+| Hub fails to start with `invalid port number` | `PG_PASSWORD` contains URL-reserved characters (`/` `#` `?`) that got composed into the connection string; switch to a plain hex password |
+| Two plugins kick each other out, half the tool surface missing | Identical `*_INSTANCE_ID` (the default "hostname-PID" always collides on host networking); give every instance a distinct explicit instance_id |
+| Plugin container Up but 0 instances, one SDK's tools missing (container logs show `VERSION_CONFLICT` retries every 5s) | Manifest / tool description / input schema changed without bumping `PLUGIN_VERSION` — the same version number must be contract-identical. The right fix is to bump the version and rebuild; as an emergency measure, delete the stale registration with `DELETE /admin/plugins/{name}/versions/{version}` (or `hubctl remove-version`) and let the plugin re-register. Rejection reasons are visible in `GET /admin/rejections` and the MCP tool `list_register_rejections` |
+| cron backups silently stopped producing | cron's default PATH cannot find docker; add the `PATH=` first line to the crontab and check backup.log |
+| Restore fails with `No such file or directory` | `psql` looks for the 5432 socket by default; add `-p 55432` |
+| Go plugin TLS handshake reset on some network paths (curl on the same path works) | A middlebox resets TLS 1.3 handshakes; the SDK provides the `HUB_TLS_MAX_VERSION` escape hatch |
+| Go does not trust a self-signed CA on macOS | Go does not read `SSL_CERT_FILE` (it uses the Keychain); for cross-machine tests run a Linux container |
 
-## 文档
+## Documentation
 
-| 文档 | 内容 |
+| Document | Contents |
 |---|---|
-| [docs/design.md](docs/design.md) | 架构取舍、契约设计、数据模型、分期里程碑、风险与显式假设 |
-| [docs/plugin-onboarding.md](docs/plugin-onboarding.md) | 插件接入全流程：四道关、契约一致性、调试与排障 |
-| [deploy/.env.example](deploy/.env.example) | 全部环境变量及取值缘由 |
-| `sdk/<语言>/README.md` | 各门 SDK 的清单与用法 |
+| [docs/design.md](docs/design.md) | Architecture trade-offs, contract design, data model, phased milestones, risks and explicit assumptions |
+| [docs/plugin-onboarding.md](docs/plugin-onboarding.md) | The full plugin onboarding flow: four gates, contract consistency, debugging and troubleshooting |
+| [deploy/.env.example](deploy/.env.example) | Every environment variable and why |
+| `sdk/<language>/README.md` | Each SDK's inventory and usage |
 
-## 仓库结构
+## Repository structure
 
 ```
 crates/
-├── hub-proto/          契约层：protobuf 定义与生成代码（唯一契约来源）
-├── hub-flow/           编排 DSL、静态校验、执行计划
-├── hub-contract/       descriptor 索引与字段级兼容检查
-├── hub-store/          持久化：PostgreSQL + sqlx 迁移
-├── hub-registry/       注册发现：自注册、心跳、摘除、实例选择
-├── hub-plugin-client/  中台 → 插件方向的 gRPC 客户端（兼可达性探测）
-├── hub-grpc/           插件 → 中台方向的 gRPC 服务端
-├── hub-engine/         编排执行：同步链、异步链、实例级治理
-├── hub-bus/            Redis Stream 总线：消费组、接管重投、死信、幂等
-├── hub-observe/        span 落库、W3C trace 传播、OTLP 导出
-├── hub-mcp/            MCP Streamable HTTP + 插件工具聚合
-├── hub-ops/            主机面运维通道（unix socket）+ hubctl
-├── hub-api/            HTTP 面：Ingress / Admin / 编排 / 健康 / 指标
-├── hub-core/           配置与共享基础类型
-├── hub-server/         二进制入口：装配后台任务与优雅退出
-├── hub-templates/      插件脚手架模板（编译期嵌入二进制）
-├── hub-mock/           内存版 mock 中台（SDK 测试用）
-└── hub-testkit/        测试夹具：可配置的插件，起在真实 gRPC 上
-sdk/                    Go / Python / Node / Rust / C# 五门插件 SDK
-examples/ping-chain/    双插件互调（caller → hub → callee）的可运行示例
-deploy/                 Dockerfile · docker-compose · nginx 配置 · 备份脚本
-docs/                   架构设计与插件接入指南
+├── hub-proto/          contract layer: protobuf definitions and generated code (single source of truth)
+├── hub-flow/           orchestration DSL, static validation, execution plans
+├── hub-contract/       descriptor index and field-level compatibility checks
+├── hub-store/          persistence: PostgreSQL + sqlx migrations
+├── hub-registry/       registry & discovery: self-registration, heartbeat, removal, instance selection
+├── hub-plugin-client/  hub → plugin gRPC client (doubles as the reachability prober)
+├── hub-grpc/           plugin → hub gRPC server
+├── hub-engine/         orchestration execution: sync chains, async chains, instance governance
+├── hub-bus/            Redis Stream bus: consumer groups, takeover redelivery, dead letters, idempotency
+├── hub-observe/        span persistence, W3C trace propagation, OTLP export
+├── hub-mcp/            MCP Streamable HTTP + plugin tool aggregation
+├── hub-ops/            host-face ops channel (unix socket) + hubctl
+├── hub-api/            HTTP face: Ingress / Admin / flows / health / metrics
+├── hub-core/           configuration and shared base types
+├── hub-server/         binary entry point: assembles background tasks and graceful shutdown
+├── hub-templates/      plugin scaffold templates (embedded into the binary at compile time)
+├── hub-mock/           in-memory mock hub (for SDK tests)
+└── hub-testkit/        test fixtures: configurable plugins running on real gRPC
+sdk/                    plugin SDKs in Go / Python / Node / Rust / C#
+examples/ping-chain/    runnable two-plugin call example (caller → hub → callee)
+deploy/                 Dockerfile · docker-compose · nginx configs · backup script
+docs/                   architecture design and plugin onboarding guide
 ```
 
-## 开发
+## Development
 
 ```bash
-cargo build --workspace          # 构建
-cargo test --workspace           # 测试（需要 DATABASE_URL 与 Redis）
+cargo build --workspace          # build
+cargo test --workspace           # test (needs DATABASE_URL and Redis)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-集成测试用**真实 PG 与 Redis**（Redis 用 `db /9`，与应用的 `db /2` 分开），没有依赖时相关用例**失败而不是静默跳过**——注册与摘除、总线重投、治理并发竞态只能对着真东西验证。`.cargo/config.toml` 提供了与本仓库 CI 同约定的 `DATABASE_URL` 兜底（本地 PG 容器映射 55433），按注释准备一次即可零配置跑测试。
+Integration tests run against **real PostgreSQL and Redis** (Redis uses `db /9`, kept apart from the app's `db /2`); when the dependencies are missing, the affected cases **fail instead of silently skipping** — registration and removal, bus redelivery, and governance concurrency races can only be validated against the real thing. `.cargo/config.toml` carries a `DATABASE_URL` fallback matching this repo's CI convention (local PG container mapped to 55433); prepare it once per the comments and tests run with zero configuration.
 
 ## License
 

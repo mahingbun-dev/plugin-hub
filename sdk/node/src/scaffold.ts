@@ -88,6 +88,7 @@ export async function scaffold(opts: ScaffoldOptions): Promise<string[]> {
       : relative
 
     const target = path.join(opts.outDir, output)
+    ensureInside(opts.outDir, target)
     await fs.mkdir(path.dirname(target), { recursive: true })
     await fs.writeFile(target, render(raw, values), 'utf8')
     written.push(output)
@@ -139,9 +140,23 @@ async function copyTree(from: string, to: string, excluded: string[]): Promise<v
     if (excluded.includes(entry.name)) continue
 
     const source = path.join(from, entry.name)
-    const target = path.join(to, entry.name)
+    const target = path.join(to, path.basename(entry.name))
+    ensureInside(to, target)
     if (entry.isDirectory()) await copyTree(source, target, [])
     else await fs.copyFile(source, target)
+  }
+}
+
+/**
+ * 写路径的统一边界：目标必须落在 `root` 之内。
+ *
+ * 调用点的拼段今天都来自受控来源（readdir 条目、模板目录遍历），但这条边界
+ * 不依赖那个假设——任何一段将来改成外部输入时，越界在这里炸而不是写穿目标根。
+ */
+function ensureInside(root: string, target: string): void {
+  const rel = path.relative(path.resolve(root), path.resolve(target))
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`写路径越界：${target} 不在 ${root} 之内`)
   }
 }
 

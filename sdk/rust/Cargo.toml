@@ -5,7 +5,7 @@ edition = "2021"
 # 放低语言版本下限，插件团队不必跟着中台的工具链走（与 Go SDK 的 go.mod 同一出发点）。
 # 1.85 是 2024 edition 的下限，这里留了余量。
 rust-version = "1.85"
-license = "UNLICENSED"
+license = "MIT"
 publish = false
 description = "plugin-hub 插件侧 SDK（Rust）：服务端骨架、自注册、心跳、被摘除后自愈、优雅退出"
 

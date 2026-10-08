@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Prepare test database
+        # 与 .cargo/config.toml 的兜底约定一致：hub:hub@55433/hub_test；
+        # CREATEDB 必须有——sqlx::test 为每条用例建临时库、跑迁移再销毁。
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -p 55433 -U postgres -c "CREATE ROLE hub LOGIN PASSWORD 'hub' CREATEDB;"
+          PGPASSWORD=postgres psql -h 127.0.0.1 -p 55433 -U postgres -c "CREATE DATABASE hub_test OWNER hub;"
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+        env:
+          DATABASE_URL: postgresql://hub:hub@127.0.0.1:55433/hub_test
+          # 测试总线用 db /9（hub-engine / hub-api 集成测试的默认值），与应用的 db /2 分开
