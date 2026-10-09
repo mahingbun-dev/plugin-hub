@@ -1,0 +1,37 @@
+name: Bug report / 问题反馈
+description: Something is broken or behaves unexpectedly / 使用中遇到错误或行为异常
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug — please fill in the details below (中文或英文均可).
+        感谢反馈，请尽量填写以下信息，便于快速定位。
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened? / 发生了什么
+      description: Expected vs actual behavior / 期望行为与实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      placeholder: |
+        1. Run `...`
+        2. See error
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment / 环境
+      placeholder: "OS, version (or commit), runtime version…  操作系统、版本号（或 commit）、运行时版本等"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output / 日志或输出
+      render: shell
