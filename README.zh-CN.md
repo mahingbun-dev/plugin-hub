@@ -495,4 +495,4 @@ cargo fmt --all
 
 ## License
 
-[MIT](LICENSE)
+版权所有 (c) 2026 mahingbun-dev（[github.com/mahingbun-dev](https://github.com/mahingbun-dev)），基于 [MIT](LICENSE) 许可证发布。

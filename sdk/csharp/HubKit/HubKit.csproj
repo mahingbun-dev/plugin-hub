@@ -6,6 +6,7 @@
          （调 PluginRegistry / HubState），所以两侧的包都要引。 -->
     <OutputType>Library</OutputType>
     <RootNamespace>HubKit</RootNamespace>
+    <Authors>mahingbun-dev</Authors>
     <AssemblyName>HubKit</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "hubkit"
 version = "0.1.0"
 description = "plugin-hub 插件侧的服务端骨架（Python）：gRPC 服务、自注册、心跳、被摘除后自愈、优雅退出"
+authors = [{ name = "mahingbun-dev" }]
 readme = "README.md"
 requires-python = ">=3.9"
 

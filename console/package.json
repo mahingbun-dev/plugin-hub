@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "description": "plugin-hub 管理控制台 demo 前端",
+  "author": "mahingbun-dev",
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },

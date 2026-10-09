@@ -495,4 +495,4 @@ Integration tests run against **real PostgreSQL and Redis** (Redis uses `db /9`,
 
 ## License
 
-[MIT](LICENSE)
+Copyright (c) 2026 mahingbun-dev ([github.com/mahingbun-dev](https://github.com/mahingbun-dev)). Released under the [MIT](LICENSE) License.
