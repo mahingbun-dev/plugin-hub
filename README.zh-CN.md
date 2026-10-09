@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-> **Rust 插件中台** —— 契约中心 · 注册发现 · 声明式编排 · 事件总线 · MCP 工具面
+> **hub 链接万物** —— Rust 插件中台：契约中心 · 注册发现 · 声明式编排 · 事件总线 · MCP 工具面 · [愿景](docs/vision.md)
 
 ![plugin-hub 架构总览](docs/assets/hero.png)
 
@@ -447,6 +447,7 @@ docker exec plugin-hub hubctl delete-plugin <name> --yes    # 不可逆，必须
 
 | 文档 | 内容 |
 |---|---|
+| [docs/vision.md](docs/vision.md) | 愿景——「hub 链接万物」：设计哲学与生态图景（门禁、A2A、hook 触发、上下文共享） |
 | [docs/design.md](docs/design.md) | 架构取舍、契约设计、数据模型、分期里程碑、风险与显式假设 |
 | [docs/plugin-onboarding.md](docs/plugin-onboarding.md) | 插件接入全流程：四道关、契约一致性、调试与排障 |
 | [deploy/.env.example](deploy/.env.example) | 全部环境变量及取值缘由 |

@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-> **Plugin hub in Rust** — contract center · registry & discovery · declarative orchestration · event bus · MCP tool surface
+> **The hub that links everything** — a plugin hub in Rust: contract center · registry & discovery · declarative orchestration · event bus · MCP tool surface · [vision](docs/vision.md)
 
 ![plugin-hub architecture](docs/assets/hero.png)
 
@@ -447,6 +447,7 @@ docker exec plugin-hub hubctl delete-plugin <name> --yes    # irreversible, expl
 
 | Document | Contents |
 |---|---|
+| [docs/vision.md](docs/vision.md) | The vision — "the hub that links everything": design philosophy and the ecosystem map (gates, A2A, hooks, shared context) |
 | [docs/design.md](docs/design.md) | Architecture trade-offs, contract design, data model, phased milestones, risks and explicit assumptions |
 | [docs/plugin-onboarding.md](docs/plugin-onboarding.md) | The full plugin onboarding flow: four gates, contract consistency, debugging and troubleshooting |
 | [deploy/.env.example](deploy/.env.example) | Every environment variable and why |
