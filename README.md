@@ -6,6 +6,10 @@ English | [简体中文](README.zh-CN.md)
 
 ![plugin-hub architecture](docs/assets/hero.png)
 
+*The web console (ships in this repo): the plugin catalog with live instances and the aggregated MCP tool surface. Thirteen pages — flow editor, trace waterfall, governance — see [Console](#console).*
+
+![Console — plugin catalog](docs/assets/console-plugins.png)
+
 [![CI](https://github.com/mahingbun-dev/plugin-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/mahingbun-dev/plugin-hub/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mahingbun-dev/plugin-hub)](https://github.com/mahingbun-dev/plugin-hub/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

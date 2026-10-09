@@ -6,6 +6,10 @@ English | [简体中文](README.zh-CN.md)
 
 ![plugin-hub 架构总览](docs/assets/hero.png)
 
+*仓库自带的 Web 控制台：插件目录 + 在线实例 + 聚合后的 MCP 工具面。共 13 个页面——流程编辑器、调用链瀑布、治理快照等，见[控制台](#控制台)。*
+
+![控制台 — 插件目录](docs/assets/console-plugins.png)
+
 [![CI](https://github.com/mahingbun-dev/plugin-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/mahingbun-dev/plugin-hub/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mahingbun-dev/plugin-hub)](https://github.com/mahingbun-dev/plugin-hub/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
