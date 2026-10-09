@@ -210,7 +210,7 @@ function compareVersion(a, b) {
 }
 
 function openFlow(row) {
-  router.push(`/hub/flows/${encodeURIComponent(row.flow)}`);
+  router.push(`/flows/${encodeURIComponent(row.flow)}`);
 }
 
 /** 从一个修订的 definition 里取出所有节点的版本约束 */

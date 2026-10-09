@@ -670,7 +670,7 @@ async function ensureName() {
       return null;
     }
   }
-  await router.replace(`/hub/flows/${encodeURIComponent(target)}/edit`);
+  await router.replace(`/flows/${encodeURIComponent(target)}/edit`);
   return target;
 }
 
@@ -864,7 +864,7 @@ function hubsNewHint() {
 }
 
 function goBack() {
-  router.push(`/hub/flows/${encodeURIComponent(flowName.value)}`);
+  router.push(`/flows/${encodeURIComponent(flowName.value)}`);
 }
 
 onMounted(async () => {

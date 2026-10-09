@@ -110,7 +110,7 @@ const traces = ref([]);
 const now = ref(Date.now());
 
 function openTrace(row) {
-  router.push(`/hub/traces/${encodeURIComponent(row.trace_id)}`);
+  router.push(`/traces/${encodeURIComponent(row.trace_id)}`);
 }
 
 /** 首尾差：这条链从第一个 span 开始到最后一个 span 结束，真实过了多久 */

@@ -1,8 +1,15 @@
 <template>
   <el-container class="console-layout">
-    <el-aside width="220px" class="console-aside">
+    <el-aside width="228px" class="console-aside">
       <div class="console-brand">
-        <span class="brand-dot"></span>
+        <span class="brand-mark">
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+            <circle cx="8" cy="3.2" r="1.9" fill="#fff" />
+            <circle cx="3.2" cy="11.6" r="1.9" fill="#fff" />
+            <circle cx="12.8" cy="11.6" r="1.9" fill="#fff" />
+            <path d="M8 3.2 3.2 11.6M8 3.2l4.8 8.4M3.2 11.6h9.6" stroke="#fff" stroke-width="1.3" />
+          </svg>
+        </span>
         <span class="brand-name">plugin-hub</span>
         <span class="brand-sub">控制台</span>
       </div>
@@ -17,6 +24,7 @@
           <span>{{ item.title }}</span>
         </el-menu-item>
       </el-menu>
+      <div class="console-foot">hub 链接万物</div>
     </el-aside>
 
     <el-container>
@@ -106,46 +114,72 @@ onBeforeUnmount(() => clearInterval(timer))
   height: 100%;
 }
 .console-aside {
-  border-right: 1px solid var(--el-border-color-light);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-right: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.015);
 }
 .console-brand {
-  height: 52px;
+  height: 56px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--el-border-color-light);
-  font-weight: 700;
+  gap: 10px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
-.brand-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--el-color-primary);
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-gradient);
+  box-shadow: 0 2px 10px -2px rgba(77, 107, 254, 0.55);
+  flex-shrink: 0;
+}
+.brand-name {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
 }
 .brand-sub {
-  color: var(--el-text-color-secondary);
-  font-weight: 400;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  padding: 1px 8px;
 }
 .console-menu {
   border-right: none;
   flex: 1;
   overflow-y: auto;
+  padding: 8px 0;
+}
+.console-foot {
+  padding: 14px 18px;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+  opacity: 0.75;
 }
 .console-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-page) 72%, transparent);
+  backdrop-filter: blur(10px);
 }
 .header-title {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--text-primary);
 }
 .header-actions {
   display: flex;
@@ -155,28 +189,39 @@ onBeforeUnmount(() => clearInterval(timer))
 .health-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   font-size: 12px;
-  padding: 2px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--el-border-color);
-  color: var(--el-text-color-regular);
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  color: var(--text-muted);
   cursor: default;
+  transition: border-color 0.2s ease;
 }
 .health-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--el-text-color-placeholder);
+  background: var(--text-muted);
+}
+.health-pill.online {
+  border-color: color-mix(in srgb, var(--color-success) 38%, transparent);
+  color: var(--color-success);
 }
 .health-pill.online .health-dot {
-  background: var(--el-color-success);
+  background: var(--color-success);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-success) 80%, transparent);
+}
+.health-pill.offline {
+  border-color: color-mix(in srgb, var(--color-danger) 38%, transparent);
+  color: var(--color-danger);
 }
 .health-pill.offline .health-dot {
-  background: var(--el-color-danger);
+  background: var(--color-danger);
 }
 .console-main {
   overflow: auto;
-  background: var(--el-bg-color-page);
+  background: transparent;
 }
 </style>

@@ -255,7 +255,7 @@ function configText(row) {
 }
 
 function openFlow(row) {
-  router.push(`/hub/flows/${encodeURIComponent(row.flow_name)}`);
+  router.push(`/flows/${encodeURIComponent(row.flow_name)}`);
 }
 
 function openCreate() {

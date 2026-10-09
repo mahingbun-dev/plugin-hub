@@ -230,11 +230,11 @@ function shortTrace(traceId) {
 }
 
 function openTrace() {
-  router.push(`/hub/traces/${encodeURIComponent(run.value.trace_id)}`);
+  router.push(`/traces/${encodeURIComponent(run.value.trace_id)}`);
 }
 
 function goBack() {
-  router.push("/hub/runs");
+  router.push("/runs");
 }
 
 async function load() {

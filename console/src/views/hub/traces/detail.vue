@@ -263,11 +263,11 @@ function attributeRows(span) {
 }
 
 function openRun(row) {
-  router.push(`/hub/runs/${encodeURIComponent(row.run_id)}`);
+  router.push(`/runs/${encodeURIComponent(row.run_id)}`);
 }
 
 function goBack() {
-  router.push("/hub/traces");
+  router.push("/traces");
 }
 
 async function load() {

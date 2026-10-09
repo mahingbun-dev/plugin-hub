@@ -215,11 +215,11 @@ async function load() {
 }
 
 function openFlow(row) {
-  router.push(`/hub/flows/${encodeURIComponent(row.name)}`);
+  router.push(`/flows/${encodeURIComponent(row.name)}`);
 }
 
 function editFlow(row) {
-  router.push(`/hub/flows/${encodeURIComponent(row.name)}/edit`);
+  router.push(`/flows/${encodeURIComponent(row.name)}/edit`);
 }
 
 function resetNewFlow() {
@@ -247,7 +247,7 @@ function createFlow() {
   }
 
   newFlowVisible.value = false;
-  router.push(`/hub/flows/${encodeURIComponent(name)}/edit`);
+  router.push(`/flows/${encodeURIComponent(name)}/edit`);
 }
 
 onMounted(load);

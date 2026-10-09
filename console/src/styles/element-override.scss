@@ -1,88 +1,128 @@
-// Element Plus 样式覆盖
+// ===== Element Plus 组件层覆盖（两种主题共用，颜色全部走 token） =====
+//
+// 主题相关的差异只在 tokens.scss 里翻转变量；这里不写死任何主题色。
+// 深色专属的少量微调在 element-dark.scss。
 
-// 覆盖表格空数据区域背景色
-.el-table {
-  .el-table__empty-block {
-    background-color: var(--bg-surface) !important;
-    color: var(--text-secondary);
-  }
-}
-
-// 确保滚动条容器也使用正确的背景色
-.el-scrollbar {
-  .el-scrollbar__wrap {
-    .el-table__empty-block {
-      background-color: var(--bg-surface) !important;
-    }
-  }
-}
-
-// 全局自定义滚动条风格（细腻简约）
-* {
-  &::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
-  }
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: var(--border-default);
-    border-radius: 3px;
-    &:hover {
-      background: var(--text-muted);
-    }
-  }
-}
-
-// 全局卡片样式提升
+// ---------- 卡片 ----------
 .el-card {
-  border-color: var(--border-default) !important;
-  border-radius: 8px !important;
+  --el-card-border-color: var(--border-subtle);
+  --el-card-border-radius: var(--radius-lg);
+  --el-card-padding: 18px;
 
   .el-card__header {
-    padding: 12px 16px;
+    padding: 14px 18px;
     border-bottom-color: var(--border-subtle);
     font-size: 14px;
-    font-weight: 500;
-    color: var(--text-primary);
-  }
-}
-
-// Tag 圆角微调
-.el-tag {
-  border-radius: 4px;
-}
-
-// 按钮圆角微调
-.el-button {
-  border-radius: 6px;
-}
-
-// Input 和 Textarea 圆角
-.el-input__wrapper {
-  border-radius: 6px;
-}
-
-.el-textarea__inner {
-  border-radius: 6px;
-}
-
-// 表格样式提升
-.el-table {
-  --el-table-header-bg-color: var(--bg-elevated);
-  --el-table-row-hover-bg-color: var(--bg-surface-hover);
-
-  th.el-table__cell {
-    font-size: 13px;
     font-weight: 600;
-    color: var(--text-secondary);
-  }
-
-  td.el-table__cell {
-    font-size: 13px;
     color: var(--text-primary);
   }
+}
+
+// 覆盖表格空数据区域背景色
+.el-table .el-table__empty-block {
+  background-color: transparent !important;
+  color: var(--text-muted);
+}
+
+.el-scrollbar .el-scrollbar__wrap .el-table__empty-block {
+  background-color: transparent !important;
+}
+
+// ---------- 主按钮：品牌渐变 + 光晕 ----------
+.el-button {
+  border-radius: var(--radius-md);
+  transition: all 0.18s ease;
+}
+
+.el-button--primary {
+  background: var(--brand-gradient) !important;
+  border: none !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 10px -2px rgba(77, 107, 254, 0.45);
+}
+
+.el-button--primary:hover,
+.el-button--primary:focus {
+  background: linear-gradient(135deg, #6e85ff 0%, #8d74fa 100%) !important;
+  box-shadow: 0 4px 16px -2px rgba(77, 107, 254, 0.55);
+  transform: translateY(-1px);
+}
+
+.el-button--primary:active {
+  transform: translateY(0);
+}
+
+.el-button--primary.is-plain,
+.el-button--primary.is-link,
+.el-button--primary.is-text {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: var(--brand-primary) !important;
+}
+
+.el-button--primary.is-plain {
+  border: 1px solid rgba(77, 107, 254, 0.45) !important;
+  background-color: var(--brand-glow) !important;
+
+  &:hover {
+    border-color: var(--brand-primary) !important;
+    background-color: rgba(77, 107, 254, 0.22) !important;
+    transform: none;
+  }
+}
+
+.el-button--primary.is-link:hover,
+.el-button--primary.is-text:hover {
+  color: var(--brand-primary-hover) !important;
+  transform: none;
+}
+
+// 次级（默认）按钮：安静的幽灵按钮
+.el-button--default {
+  background-color: transparent !important;
+  border-color: var(--border-default) !important;
+  color: var(--text-secondary) !important;
+}
+
+.el-button--default:hover,
+.el-button--default:focus {
+  background-color: var(--bg-surface-hover) !important;
+  border-color: var(--brand-primary) !important;
+  color: var(--brand-primary) !important;
+}
+
+// ---------- 输入 ----------
+.el-input__wrapper,
+.el-textarea__inner {
+  background-color: var(--bg-surface) !important;
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 1px var(--border-default) inset !important;
+  transition: box-shadow 0.18s ease;
+}
+
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--brand-primary) inset !important;
+}
+
+.el-input__wrapper.is-focus {
+  box-shadow:
+    0 0 0 1px var(--brand-primary) inset,
+    0 0 0 3px var(--brand-glow) !important;
+}
+
+.el-textarea__inner:focus {
+  box-shadow:
+    0 0 0 1px var(--brand-primary) inset,
+    0 0 0 3px var(--brand-glow) !important;
+}
+
+.el-input__inner {
+  color: var(--text-primary) !important;
+}
+
+.el-select-dropdown {
+  border-radius: 12px;
 }
 
 // 修复 el-select 下拉框面板高度异常（teleport 到 body 的 dropdown）
@@ -90,15 +130,45 @@
 // overflow: hidden（覆盖 Element Plus 默认的 overflow: auto），避免与内层
 // 滚动条叠加出现"双重滚动条"问题。
 .el-select-dropdown {
-  max-height: 200px !important;
+  max-height: 220px !important;
   display: block !important;
   overflow: hidden !important;
 }
 
 .el-select-dropdown__wrap {
-  max-height: 180px !important;
+  max-height: 200px !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
+}
+
+// ---------- 表格 ----------
+.el-table {
+  --el-table-header-bg-color: transparent;
+  --el-table-header-text-color: var(--text-muted);
+  --el-table-text-color: var(--text-primary);
+  --el-table-border-color: var(--border-subtle);
+  --el-table-row-hover-bg-color: var(--bg-surface-hover);
+  --el-table-tr-bg-color: transparent;
+
+  th.el-table__cell {
+    background-color: transparent !important;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-muted) !important;
+  }
+
+  td.el-table__cell {
+    font-size: 13.5px;
+    padding: 6px 0;
+  }
+}
+
+// ---------- 对话框 / 遮罩 ----------
+.el-dialog {
+  border-radius: var(--radius-xl) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: var(--shadow-pop) !important;
 }
 
 // 确保对话框遮罩层有正确的 z-index
@@ -113,4 +183,78 @@
 // 确保对话框本身显示在遮罩层之上
 .el-dialog {
   z-index: 2001 !important;
+}
+
+// ---------- Tag ----------
+.el-tag {
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+// ---------- 菜单（侧边栏） ----------
+.el-menu {
+  border: none !important;
+}
+
+.el-menu-item {
+  height: 42px !important;
+  line-height: 42px !important;
+  margin: 3px 10px;
+  border-radius: 10px;
+  color: var(--text-muted) !important;
+  transition: background-color 0.16s ease, color 0.16s ease;
+
+  .el-icon {
+    color: inherit;
+  }
+
+  &:hover {
+    background-color: var(--bg-surface-hover) !important;
+    color: var(--text-primary) !important;
+  }
+
+  &.is-active {
+    background: var(--brand-glow) !important;
+    color: var(--brand-primary) !important;
+    font-weight: 600;
+    position: relative;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: -10px;
+      top: 8px;
+      bottom: 8px;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: var(--brand-gradient);
+    }
+  }
+}
+
+// ---------- 滚动条 ----------
+* {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--border-default);
+    border-radius: 3px;
+    &:hover {
+      background: var(--text-muted);
+    }
+  }
+}
+
+// ---------- 分页 / 空态 / 描述列表 ----------
+.el-pagination {
+  --el-pagination-button-bg-color: transparent;
+}
+
+.el-descriptions__label {
+  color: var(--text-muted) !important;
 }

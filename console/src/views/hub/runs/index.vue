@@ -217,11 +217,11 @@ function shortTrace(traceId) {
 }
 
 function openRun(row) {
-  router.push(`/hub/runs/${encodeURIComponent(row.run_id)}`);
+  router.push(`/runs/${encodeURIComponent(row.run_id)}`);
 }
 
 function openTrace(row) {
-  router.push(`/hub/traces/${encodeURIComponent(row.trace_id)}`);
+  router.push(`/traces/${encodeURIComponent(row.trace_id)}`);
 }
 
 async function load() {

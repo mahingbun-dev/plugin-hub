@@ -553,7 +553,7 @@ function onNodeClick({ node }) {
 }
 
 function goBack() {
-  router.push("/hub/flows");
+  router.push("/flows");
 }
 
 async function load() {

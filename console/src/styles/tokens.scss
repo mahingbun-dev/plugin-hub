@@ -1,0 +1,172 @@
+// ===== 设计 token 层 =====
+//
+// 全站的颜色/圆角/阴影只在这里声明。之前 element-dark.scss 引用的
+// --bg-surface / --brand-primary 等变量从未被定义，整层覆盖实际是死代码，
+// 页面只能靠 Element Plus 默认暗色（纯黑 + 默认蓝）硬撑——这就是「像线框图」
+// 的根源。品牌色与 hub 推广物料（tech-dark 知识卡片）同一套：
+// 靛蓝 #4D6BFE → 紫 #8B5CF6 渐变，深色底是海军蓝而不是纯黑。
+
+// ---------- 品牌色（两种主题共用） ----------
+:root {
+  --brand-primary: #4d6bfe;
+  --brand-primary-hover: #6e85ff;
+  --brand-accent: #8b5cf6;
+  --brand-gradient: linear-gradient(135deg, #4d6bfe 0%, #7a5af8 100%);
+  --brand-gradient-text: linear-gradient(92deg, #4d6bfe, #8b5cf6);
+  --brand-glow: rgba(77, 107, 254, 0.14);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px -12px rgba(16, 24, 40, 0.12);
+  --shadow-pop: 0 12px 40px -8px rgba(16, 24, 40, 0.22);
+}
+
+// ---------- 浅色主题 ----------
+:root {
+  --bg-page: #f4f6fb;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-elevated-solid: #ffffff;
+  --bg-surface-hover: rgba(77, 107, 254, 0.06);
+
+  --border-subtle: #eef0f6;
+  --border-default: #e3e7f0;
+
+  --text-primary: #1c2337;
+  --text-secondary: #4c556b;
+  --text-muted: #8a92a9;
+
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-info: #4d6bfe;
+}
+
+// ---------- 深色主题（海军蓝分层 + 靛紫品牌） ----------
+html.dark {
+  color-scheme: dark;
+
+  --bg-page: #0a0f1e;
+  --bg-surface: #101728;
+  --bg-elevated: #141c31;
+  --bg-elevated-solid: #1a2340;
+  --bg-surface-hover: rgba(110, 133, 255, 0.1);
+
+  --border-subtle: rgba(151, 165, 216, 0.1);
+  --border-default: rgba(151, 165, 216, 0.2);
+
+  --text-primary: #eaeeff;
+  --text-secondary: #a9b3d4;
+  --text-muted: #6f7a9d;
+
+  --color-success: #3dd68c;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #60a5fa;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 10px 28px -14px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 48px -8px rgba(0, 0, 0, 0.55);
+
+  // --- Element Plus 变量映射（深色） ---
+  --el-bg-color-page: var(--bg-page);
+  --el-bg-color: var(--bg-surface);
+  --el-bg-color-overlay: var(--bg-elevated);
+  --el-border-color: var(--border-default);
+  --el-border-color-light: var(--border-subtle);
+  --el-border-color-lighter: var(--border-subtle);
+  --el-border-color-extra-light: rgba(151, 165, 216, 0.06);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+  --el-text-color-secondary: var(--text-muted);
+  --el-text-color-placeholder: #556083;
+  --el-fill-color: rgba(151, 165, 216, 0.08);
+  --el-fill-color-light: rgba(151, 165, 216, 0.06);
+  --el-fill-color-lighter: rgba(151, 165, 216, 0.04);
+  --el-fill-color-blank: var(--bg-surface);
+  --el-disabled-bg-color: rgba(151, 165, 216, 0.06);
+  --el-disabled-border-color: var(--border-subtle);
+
+  // 品牌色系：light-N 用于图标底、tag 底等，深色下半透明才不发闷
+  --el-color-primary: #5b78ff;
+  --el-color-primary-light-3: #7e93ff;
+  --el-color-primary-light-5: rgba(91, 120, 255, 0.38);
+  --el-color-primary-light-7: rgba(91, 120, 255, 0.24);
+  --el-color-primary-light-8: rgba(91, 120, 255, 0.17);
+  --el-color-primary-light-9: rgba(91, 120, 255, 0.12);
+  --el-color-primary-dark-2: #4d6bfe;
+
+  --el-color-success: var(--color-success);
+  --el-color-success-light-3: #6ee2ab;
+  --el-color-success-light-5: rgba(61, 214, 140, 0.38);
+  --el-color-success-light-7: rgba(61, 214, 140, 0.24);
+  --el-color-success-light-8: rgba(61, 214, 140, 0.17);
+  --el-color-success-light-9: rgba(61, 214, 140, 0.12);
+  --el-color-success-dark-2: #2bb877;
+
+  --el-color-warning: var(--color-warning);
+  --el-color-warning-light-3: #fcd34d;
+  --el-color-warning-light-5: rgba(251, 191, 36, 0.38);
+  --el-color-warning-light-7: rgba(251, 191, 36, 0.24);
+  --el-color-warning-light-8: rgba(251, 191, 36, 0.17);
+  --el-color-warning-light-9: rgba(251, 191, 36, 0.12);
+  --el-color-warning-dark-2: #d9a50f;
+
+  --el-color-danger: var(--color-danger);
+  --el-color-danger-light-3: #fa9c9c;
+  --el-color-danger-light-5: rgba(248, 113, 113, 0.38);
+  --el-color-danger-light-7: rgba(248, 113, 113, 0.24);
+  --el-color-danger-light-8: rgba(248, 113, 113, 0.17);
+  --el-color-danger-light-9: rgba(248, 113, 113, 0.12);
+  --el-color-danger-dark-2: #ef5350;
+
+  --el-color-error: var(--color-danger);
+  --el-color-error-light-3: #fa9c9c;
+  --el-color-error-light-5: rgba(248, 113, 113, 0.38);
+  --el-color-error-light-7: rgba(248, 113, 113, 0.24);
+  --el-color-error-light-8: rgba(248, 113, 113, 0.17);
+  --el-color-error-light-9: rgba(248, 113, 113, 0.12);
+  --el-color-error-dark-2: #ef5350;
+
+  --el-color-info: var(--color-info);
+  --el-color-info-light-3: #8cb8fb;
+  --el-color-info-light-5: rgba(96, 165, 250, 0.38);
+  --el-color-info-light-7: rgba(96, 165, 250, 0.24);
+  --el-color-info-light-8: rgba(96, 165, 250, 0.17);
+  --el-color-info-light-9: rgba(96, 165, 250, 0.12);
+  --el-color-info-dark-2: #4d8de6;
+}
+
+// ---------- 浅色主题的 Element Plus 变量（品牌色对齐，中性色用 EP 默认） ----------
+:root {
+  --el-color-primary: var(--brand-primary);
+  --el-color-primary-light-3: #8197ff;
+  --el-color-primary-light-5: #adbaff;
+  --el-color-primary-light-7: #d3dbff;
+  --el-color-primary-light-8: #e6eaff;
+  --el-color-primary-light-9: #f0f3ff;
+  --el-color-primary-dark-2: #3f57cb;
+  --el-border-radius-base: 8px;
+  --el-font-family: Inter, Helvetica Neue, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Arial, sans-serif;
+}
+
+// ---------- 页面底色：深色带品牌光晕，浅色素净 ----------
+body {
+  background-color: var(--bg-page);
+}
+
+html.dark body {
+  background-image:
+    radial-gradient(720px 400px at 88% -6%, rgba(77, 107, 254, 0.14), transparent 62%),
+    radial-gradient(560px 340px at -8% 104%, rgba(139, 92, 246, 0.1), transparent 60%);
+  background-attachment: fixed;
+}
+
+html:not(.dark) body {
+  background-image:
+    radial-gradient(720px 400px at 88% -6%, rgba(77, 107, 254, 0.05), transparent 62%),
+    radial-gradient(560px 340px at -8% 104%, rgba(139, 92, 246, 0.04), transparent 60%);
+  background-attachment: fixed;
+}

@@ -1,0 +1,72 @@
+// ===== 页面公共类的视觉打磨 =====
+//
+// 13 个页面共享同一套 class（page-header / stat-card / section-card / card-header…，
+// 见各 view 的 scoped 样式）。这里只做「质感层」：卡片立体感、数字排印、图标底座、
+// 等宽字体；不碰布局属性（间距/对齐仍归各页面 scoped 样式，避免全局打架）。
+
+// ---------- 卡片：统一的立体感与边界 ----------
+.el-card {
+  border-radius: var(--radius-lg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+html.dark .el-card {
+  // 顶部 1px 高光让卡片从海军蓝底上「浮」出来
+  background-image: linear-gradient(180deg, rgba(151, 165, 216, 0.04), rgba(151, 165, 216, 0) 56px);
+}
+
+// ---------- 指标卡（每页顶部的数字卡） ----------
+.stat-card {
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.stat-card:hover {
+  border-color: var(--border-default) !important;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop) !important;
+}
+
+.stat-value {
+  font-size: 28px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.stat-label {
+  font-size: 12.5px !important;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.stat-icon {
+  border-radius: 12px !important;
+}
+
+// ---------- 页头 ----------
+.page-header .header-title {
+  font-weight: 700 !important;
+  letter-spacing: 0.01em;
+}
+
+// ---------- 卡片头：小节标题统一节奏 ----------
+.card-header {
+  font-weight: 600;
+}
+
+// ---------- 等宽与弱化文本（视图里大量使用的通用类） ----------
+.mono {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+// ---------- 空态不至于太寡淡 ----------
+.el-table__empty-block {
+  padding: 28px 0;
+}

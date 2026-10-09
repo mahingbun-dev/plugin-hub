@@ -92,7 +92,8 @@
             </el-button>
           </div>
 
-          <div class="tpl-hint">
+          <!-- 与上面的「复制命令」同理：脚手架是 Go 专属，别的语言显示这条 Go 命令是假的 -->
+          <div v-if="tpl.lang === 'go'" class="tpl-hint">
             已有中台仓库检出、且要写 Go 插件？也可以直接在中台仓库的 <code>sdk/go</code>
             下跑 <code>go run ./cmd/hub-plugin new &lt;插件名&gt;</code>——
             <strong>两条路生成的是同一批文件</strong>，用哪条都一样。

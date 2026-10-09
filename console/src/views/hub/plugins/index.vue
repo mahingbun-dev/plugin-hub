@@ -18,7 +18,7 @@
           </el-tag>
           <!-- 要写插件的人是从这里开始的：他先来看「已有什么插件」，
                然后问「我怎么写一个」。入口放这儿比放一级菜单更贴近那一下 -->
-          <el-button @click="router.push('/hub/onboarding')">
+          <el-button @click="router.push('/onboarding')">
             <el-icon><Download /></el-icon> 开发插件
           </el-button>
           <el-button :loading="loading" @click="refreshAll">

@@ -213,7 +213,7 @@ function shortId(id) {
 }
 
 function openRun(runId) {
-  router.push(`/hub/runs/${encodeURIComponent(runId)}`);
+  router.push(`/runs/${encodeURIComponent(runId)}`);
 }
 
 function openDetail(row) {

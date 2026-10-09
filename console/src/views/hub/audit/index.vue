@@ -180,7 +180,7 @@ function switchPage(next) {
 }
 
 function openTrace(row) {
-  router.push(`/hub/traces/${encodeURIComponent(row.trace_id)}`);
+  router.push(`/traces/${encodeURIComponent(row.trace_id)}`);
 }
 
 function statusLabel(status) {
