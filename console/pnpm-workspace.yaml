@@ -1,0 +1,6 @@
+# pnpm 10+ 的依赖构建脚本白名单。
+# esbuild/vue-demi 的 postinstall 安装平台二进制，不批准则 vite 无法启动。
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  vue-demi: true

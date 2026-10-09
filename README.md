@@ -89,11 +89,11 @@ Design notes:
 |---|---|
 | Hub | Rust: axum + tonic + sqlx + PostgreSQL + redis-rs + tracing + metrics-exporter-prometheus |
 | Plugin SDK | Go (default); contracts are protobuf, implementable in any language |
-| Console | Vue 3 + Element Plus + Vue Flow (built in a separate repo), served statically by nginx |
+| Console | Vue 3 + Element Plus + Vue Flow (in this repo, `console/`), served statically by nginx |
 
 ### Console
 
-The companion web console (separate repo) is deployed same-origin with the hub's HTTP face — eleven pages (ten menu items plus the flow topology you reach from the list):
+The web console lives in this repository ([`console/`](console/) — a standalone Vue 3 + Element Plus + Vue Flow frontend; `pnpm dev` to run, no login needed since the admin face ships without built-in auth; in production it deploys same-origin with the hub's HTTP face, zero CORS). Thirteen pages (eleven menu items plus the flow topology / trace detail reached from the lists):
 
 | Page | Contents |
 |---|---|
@@ -107,6 +107,9 @@ The companion web console (separate repo) is deployed same-origin with the hub's
 | Triggers | Register, enable/disable, delete cron / MQ triggers |
 | Governance | Concurrency usage, breaker state, consecutive failures, cumulative admissions |
 | Version upgrades | Find the nodes still pinned to old versions — the operations desk for rolling upgrades |
+| Audit / onboarding | Registration rejections & inter-call authorization audit; scaffold template download |
+
+For local setup (database, backend, frontend — full walkthrough), see [console/README.md](console/README.md).
 
 ## Core concepts
 
@@ -215,6 +218,15 @@ Expected response (200; fields match the hub's `IngressResponse`; `payload` is w
 ```
 
 The full onboarding walkthrough is in [docs/plugin-onboarding.md](docs/plugin-onboarding.md); for a runnable example of two plugins discovering and calling each other, see [examples/ping-chain](examples/ping-chain/).
+
+**5. Start the web console (optional)**:
+
+```bash
+cd console && pnpm install && pnpm dev
+# open http://127.0.0.1:5180/plugins
+```
+
+All thirteen pages — plugin catalog, flow editor, trace waterfall, governance, and more — work against the local hub. Database configuration and the full local debugging setup are in [console/README.md](console/README.md).
 
 ## Agent access (MCP)
 
@@ -463,6 +475,7 @@ crates/
 ├── hub-mock/           in-memory mock hub (for SDK tests)
 └── hub-testkit/        test fixtures: configurable plugins running on real gRPC
 sdk/                    plugin SDKs in Go / Python / Node / Rust / C#
+console/                web console demo (Vue 3 + Element Plus + Vue Flow)
 examples/ping-chain/    runnable two-plugin call example (caller → hub → callee)
 deploy/                 Dockerfile · docker-compose · nginx configs · backup script
 docs/                   architecture design and plugin onboarding guide

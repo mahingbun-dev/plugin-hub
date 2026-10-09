@@ -88,11 +88,11 @@ plugin-hub 的取舍很明确：多跑一个中台（compose 自带 PG / Redis�
 |---|---|
 | 中台 | Rust：axum + tonic + sqlx + PostgreSQL + redis-rs + tracing + metrics-exporter-prometheus |
 | 插件 SDK | Go（默认）；契约由 protobuf 定义，任意语言可实现 |
-| 控制台 | Vue 3 + Element Plus + Vue Flow（另仓实现），由 nginx 静态 serve |
+| 控制台 | Vue 3 + Element Plus + Vue Flow（本仓库 console/），由 nginx 静态 serve |
 
 ### 控制台
 
-配套的 Web 控制台（另仓实现）与中台 HTTP 面同源部署，共十一个页面（十个菜单项 + 从列表点进去的流程拓扑）：
+本仓库 [`console/`](console/) 自带 Web 控制台（Vue 3 + Element Plus + Vue Flow 的独立前端，`pnpm dev` 即起，对接中台 HTTP 面无需登录——管理面默认无内置鉴权；生产部署与 HTTP 面同源，零 CORS）。共十三个页面（十一个菜单项 + 从列表点进去的流程拓扑 / 调用链详情）：
 
 | 页面 | 内容 |
 |---|---|
@@ -106,6 +106,9 @@ plugin-hub 的取舍很明确：多跑一个中台（compose 自带 PG / Redis�
 | 触发器 | cron / MQ 的登记、启停、删除 |
 | 治理 | 并发占用、熔断状态、连续失败、累计放行 |
 | 版本升级 | 找出锁在旧版本上的节点——灰度升级的操作台 |
+| 插件审计 / 插件开发接入 | 插件注册拒绝与互调授权审计；脚手架模板下载 |
+
+本地启动（数据库配置、后端、前端三步完整指引）见 [console/README.md](console/README.md)。
 
 ## 核心概念
 
@@ -214,6 +217,16 @@ curl -X POST http://127.0.0.1:8092/ingress/order-reader \
 ```
 
 完整接入流程见 [docs/plugin-onboarding.md](docs/plugin-onboarding.md)；两个插件互相发现与调用的可运行示例见 [examples/ping-chain](examples/ping-chain/)。
+
+**5. 启动 Web 控制台（可选）**：
+
+```bash
+cd console && pnpm install && pnpm dev
+# 打开 http://127.0.0.1:5180/plugins
+```
+
+插件目录、编排编辑器、调用链瀑布图等十三个页面全部可用。数据库配置与
+完整本地调试环境说明见 [console/README.md](console/README.md)。
 
 ## Agent 接入（MCP）
 
@@ -462,6 +475,7 @@ crates/
 ├── hub-mock/           内存版 mock 中台（SDK 测试用）
 └── hub-testkit/        测试夹具：可配置的插件，起在真实 gRPC 上
 sdk/                    Go / Python / Node / Rust / C# 五门插件 SDK
+console/                Web 控制台 demo（Vue 3 + Element Plus + Vue Flow）
 examples/ping-chain/    双插件互调（caller → hub → callee）的可运行示例
 deploy/                 Dockerfile · docker-compose · nginx 配置 · 备份脚本
 docs/                   架构设计与插件接入指南

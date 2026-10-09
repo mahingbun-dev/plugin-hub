@@ -1,0 +1,116 @@
+// Element Plus 样式覆盖
+
+// 覆盖表格空数据区域背景色
+.el-table {
+  .el-table__empty-block {
+    background-color: var(--bg-surface) !important;
+    color: var(--text-secondary);
+  }
+}
+
+// 确保滚动条容器也使用正确的背景色
+.el-scrollbar {
+  .el-scrollbar__wrap {
+    .el-table__empty-block {
+      background-color: var(--bg-surface) !important;
+    }
+  }
+}
+
+// 全局自定义滚动条风格（细腻简约）
+* {
+  &::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--border-default);
+    border-radius: 3px;
+    &:hover {
+      background: var(--text-muted);
+    }
+  }
+}
+
+// 全局卡片样式提升
+.el-card {
+  border-color: var(--border-default) !important;
+  border-radius: 8px !important;
+
+  .el-card__header {
+    padding: 12px 16px;
+    border-bottom-color: var(--border-subtle);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+}
+
+// Tag 圆角微调
+.el-tag {
+  border-radius: 4px;
+}
+
+// 按钮圆角微调
+.el-button {
+  border-radius: 6px;
+}
+
+// Input 和 Textarea 圆角
+.el-input__wrapper {
+  border-radius: 6px;
+}
+
+.el-textarea__inner {
+  border-radius: 6px;
+}
+
+// 表格样式提升
+.el-table {
+  --el-table-header-bg-color: var(--bg-elevated);
+  --el-table-row-hover-bg-color: var(--bg-surface-hover);
+
+  th.el-table__cell {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  td.el-table__cell {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+}
+
+// 修复 el-select 下拉框面板高度异常（teleport 到 body 的 dropdown）
+// 注意：只能让内层 el-scrollbar__wrap 滚动。外层 el-select-dropdown 强制
+// overflow: hidden（覆盖 Element Plus 默认的 overflow: auto），避免与内层
+// 滚动条叠加出现"双重滚动条"问题。
+.el-select-dropdown {
+  max-height: 200px !important;
+  display: block !important;
+  overflow: hidden !important;
+}
+
+.el-select-dropdown__wrap {
+  max-height: 180px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+// 确保对话框遮罩层有正确的 z-index
+.el-overlay {
+  z-index: 2000 !important;
+}
+
+.el-dialog__wrapper {
+  z-index: 2000 !important;
+}
+
+// 确保对话框本身显示在遮罩层之上
+.el-dialog {
+  z-index: 2001 !important;
+}
