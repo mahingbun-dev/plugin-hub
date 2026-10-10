@@ -335,10 +335,7 @@ fn write_upgrade_sources(manifest_dir: &Path, out: &mut String) {
         "\n/// M6 升级包素材：(语言 id, 素材清单)。None = 这门语言的素材还没产出。\n\
          /// 由 build.rs 的 UPGRADE_DIRS 扫描生成，请勿手改。"
     );
-    let _ = writeln!(
-        out,
-        "#[allow(clippy::type_complexity)]"
-    );
+    let _ = writeln!(out, "#[allow(clippy::type_complexity)]");
     let _ = writeln!(
         out,
         "static UPGRADE_SOURCES: &[(&str, Option<&[(&str, &[u8])]>)] = &["
