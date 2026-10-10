@@ -1,0 +1,38 @@
+# @@name@@ 的 M6 升级包（插件互调与发现）
+
+这个包给**存量插件项目**补上 M6（PluginGateway 互调/发现）的示例与文档。升级动作
+只有「新增文件」和「追加 README 小节」，**不改任何既有文件**——随时可回退
+（删掉新增文件、还原 README 即可）。
+
+## 升级了什么
+
+| 文件 | 动作 | 说明 |
+|---|---|---|
+| `examples/gateway_demo.rs` | 新增 | 休眠演示：发现三件套 + 同步互调（传当前信封）+ 异步发布。编译通过、不接线到主流程 |
+| `README.md` | 追加 | 「插件互调与发现（M6）」小节（`m6-intercall` marker 包裹，也是升级脚本幂等的判据） |
+
+## 怎么用
+
+把本包的三个文件（`gateway_demo.rs` / `upgrade.sh` / `UPGRADE.md`）放到
+@@name@@ 的**项目根**下，执行：
+
+```bash
+bash upgrade.sh
+```
+
+脚本幂等：重复执行时对已就位的文件全部 SKIP；工作区有未提交改动时会要求确认
+（`bash upgrade.sh --force` 可跳过）。
+
+真要在插件里互调时：实现 `Plugin::set_gateway` 接住骨架注入的 `GatewayClient`，
+把 `gateway_demo.rs` 里的演示函数挪进 `src/plugin.rs`（或 `include!` 进来），
+在 `handle` 里调用。互调传当前信封（`current_envelope`）：trace 贯通 + 链路防环，
+互调链由中台维护、**不要自己往里追加自己**。
+
+## 检查清单
+
+- [ ] `cargo test` 仍全绿（examples/ 的休眠演示会被它一并编译——示例编不过就是在这里红）
+- [ ] `README.md` 末尾出现「插件互调与发现（M6）」小节
+- [ ] 互调前确认中台策略：`HUB_PLUGIN_CALL_POLICY=declared` 时需在 manifest 声明
+      `invokes` 名单（`src/plugin.rs` 的 manifest 里有注释示例），声明属契约变更要升版本号
+- [ ] 配额与防环由中台兜底：每插件每分钟 60 次互调、调用链深上限 8
+- [ ] 确认无误后删除项目根下残留的素材：`gateway_demo.rs`、`upgrade.sh`、`UPGRADE.md`

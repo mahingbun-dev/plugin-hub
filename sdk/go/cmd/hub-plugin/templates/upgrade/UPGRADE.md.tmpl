@@ -1,0 +1,47 @@
+# @@name@@ 的 M6 升级说明（插件互调与发现）
+
+这个升级包给存量插件工程补上 M6（插件互调与发现）的东西。它**只新增文件、不改已有
+文件**——存量工程必然已经漂移，改已有文件的补丁一定会跟本地改动打架。
+
+三件套：
+
+| 文件 | 干什么 |
+|---|---|
+| `gateway_example.go` | 发现 / 同步互调 / 异步发布三段**休眠演示**：能编译、不接线，照着抄 |
+| `upgrade.sh` | 幂等升级脚本：核对 gateway_example、给 README 追加 M6 小节、做 Go 门自检 |
+| `UPGRADE.md` | 本文件：升级说明与检查清单 |
+
+## 怎么用
+
+```bash
+# 方式一：CLI（hub-scaffold 与中台下载接口同一份代码）
+hub-scaffold upgrade go --dir <工程根> --name @@name@@
+cd <工程根> && bash upgrade.sh
+
+# 方式二：手动——把 zip 解压出的三件套拷进工程根，然后
+bash upgrade.sh
+```
+
+`upgrade.sh` 是幂等的：每个动作都是「不在才写」，重复跑只有第一次有写入。
+
+## 升级后要检查什么
+
+1. **构建与测试**：`go mod tidy && go build ./... && go test ./...`
+   （`gateway_example.go` 参与编译，编不过说明 SDK 副本还是 M6 之前的——见下一条。）
+2. **SDK 副本带互调能力**：构建真正读到的是 `vendor/` 里那份 SDK，M6 的互调客户端
+   是 `hubkit/gateway.go`。`upgrade.sh` 会检查；缺了就 `go mod vendor` 同步
+   （check-go-vendor.sh 会拦 vendor 漂移），并确认 `go.mod` 的 replace 指向包内 `./sdk`。
+3. **互调授权声明**：要经中台调用其他插件时，在 manifest 里声明
+   `Invokes: []string{"目标插件名"}`——declared 策略下声明了才会放行调用；声明属于
+   契约变更，记得升版本号。不实际互调就不用声明，示例文件不接线、不影响行为。
+4. **配额与防环**：互调每插件每分钟 60 次、调用链深度上限 8。`InvokePlugin` 记得传
+   `CurrentEnvelope`（当前信封）——trace 才能贯通、防环链才能带上；不要自己往链里
+   追加自己，那是中台代调时做的事。
+5. **README**：`upgrade.sh` 会把「插件互调与发现（M6）」小节追加到 README 末尾
+   （有 `m6-intercall-start` marker 就跳过）。
+
+## 更多
+
+- 接入与排错的完整文档：中台仓库 `docs/plugin-onboarding.md`
+- 可跑起来的两插件互调示例：中台仓库 `examples/ping-chain`
+- 五门语言都有同款升级包：中台下载接口 `GET /plugin-templates/go/upgrade-package?name=@@name@@`

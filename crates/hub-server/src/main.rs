@@ -136,10 +136,18 @@ async fn main() -> anyhow::Result<()> {
     let api_state = match cfg.auth_plugin.as_deref() {
         Some(plugin) => {
             info!(plugin, "管理面鉴权已启用");
-            api_state.with_authz(hub_api::authz::AuthzConfig {
-                plugin: plugin.to_string(),
-                version: cfg.auth_plugin_version.clone(),
-            })
+            api_state
+                .with_authz(hub_api::authz::AuthzConfig {
+                    plugin: plugin.to_string(),
+                    version: cfg.auth_plugin_version.clone(),
+                    // 与 MCP 面同一个开关：/mcp 的无凭证放行只在这边开着时生效，
+                    // 两处语义必须同源，否则会出现「闸门弹窗但 HTTP 层先 401」的死锁
+                    mcp_login_gate: cfg.mcp_login_gate,
+                })
+                // 嵌入场景的传输层开关：跨 origin（同站）嵌入时浏览器要求服务端
+                // 应答 CORS 头，带 Cookie 的跨域 fetch 才会被放行。None = 不挂层，
+                // 同域反代部署零行为变化（白名单见 HUB_CORS_ALLOWED_ORIGINS）。
+                .with_cors(cfg.cors_allowed_origins.clone())
         }
         None => {
             warn!(

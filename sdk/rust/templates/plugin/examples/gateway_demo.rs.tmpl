@@ -1,0 +1,140 @@
+//! @@name@@ 的插件互调与发现演示（M6）——**休眠代码**，不接线到插件主流程。
+//!
+//! 放在 `examples/` 而不是 `src/` 下是刻意的：example 不进 crate 本体（lib）的
+//! 编译，模板产物保持零警告；而 `cargo test` 会把 examples/ 一并编译——示例与
+//! SDK 的漂移在这里就会红，不用另跑命令，也不会等插件作者抄过去才发现。
+//!
+//! **为什么 main 里拿不到真的客户端**：`GatewayClient` 的构造函数是 SDK 私有的
+//! （互调凭证由中台在注册时下发，只有骨架 `run` 拿得到），所以这个 example 不能
+//! 独立运行。真正的用法：实现 [`@@sdk_module@@::Plugin::set_gateway`] 把客户端
+//! 存进插件（与 `src/plugin.rs` 的 `state` 槽同一款写法），在 `handle` 里调用
+//! 下面的演示函数。
+
+use std::sync::Arc;
+
+use @@sdk_module@@::{envelope, Envelope, GatewayClient, GatewayError, InvokeOptions, StateClient};
+
+/// 发现三件套：现在能调谁、谁在产/消某条消息、目标插件吃什么吐什么。
+///
+/// 都只从中台取，别旁路维护一份硬编码名单——那份名单会在别人改契约的
+/// 第一个小时里过时。
+async fn demo_discovery(gateway: &GatewayClient) -> Result<(), GatewayError> {
+    // ① 在线插件清单（include_offline=false 只列有健康实例的）。
+    // 排查「我声明的上游为什么调不到」时给 true，把离线的也带出来看。
+    let plugins = gateway.list_plugins(false).await?;
+    for p in &plugins.plugins {
+        // 演示只打印；真实用法是从清单里找目标插件/版本
+        eprintln!("插件 {}@{}（{}）", p.name, p.latest_version, p.online);
+    }
+
+    // ② 消息类型 → 生产者 / 消费者。`google.protobuf.Struct`
+    // 就是「直接调用的 JSON 载荷」，看谁接受它就知道谁能被 agent 直接调。
+    let endpoints = gateway.describe_message("google.protobuf.Struct").await?;
+    let _ = endpoints; // producers / consumers 两个字段各是一份 MessageEndpoint 清单
+
+    // ③ 目标插件的契约：调别人之前先看它吃什么、吐什么。
+    // version 给 None 取最新已注册版本；多版本共存时锁版本是更稳的选择。
+    let contract = gateway.get_contract("目标插件名", None, None).await?;
+    let _ = contract; // 真实用法：比对 consumes/produces 与你打算发的载荷
+
+    Ok(())
+}
+
+/// 同步互调 + 异步发布的演示。三个参数都是插件 `handle` 里现成的东西：
+/// 客户端来自 `set_gateway` 注入、state 来自 `set_state`、信封就是本次处理的入参。
+async fn demo_invoke_and_publish(
+    gateway: &GatewayClient,
+    state: Option<&StateClient>,
+    env: &Envelope,
+) -> Result<(), GatewayError> {
+    // ---- 同步互调：要下游的处理结果、愿意同步等 ----
+    //
+    // current_envelope 传**当前正在处理的信封**：trace 从上游贯通到下游，互调链
+    // （meta 的 `hub.call_chain`）原样带下去让防环生效。链是**原样复制**的——
+    // 不要自己往链上追加自己，中台在整备时会把本次 caller（按凭证反查的那个）
+    // 追加进去，SDK 抢着做会让防环与审计的判断对象出错。
+    let out = match gateway
+        .invoke_plugin(
+            "目标插件名",
+            serde_json::json!({ "text": "来自 @@name@@ 的互调" }),
+            InvokeOptions {
+                version: None, // None = 目标最新版本；锁版本见 demo_discovery 的 ③
+                timeout_ms: Some(30_000),
+                current_envelope: Some(env),
+            },
+        )
+        .await
+    {
+        Ok(out) => out,
+        // REJECTED 是下游校验器的**意见**：issues 能定位到具体字段，改数据重试有意义
+        Err(GatewayError::Rejected { reason, issues }) => {
+            eprintln!("被目标插件拒绝：{reason}（{} 条问题）", issues.len());
+            return Ok(());
+        }
+        // ERROR 是中台/下游的**裁决**（未声明 invokes、超配额、成环、链深超限、
+        // 下游出错……）：重试同一条请求大概率还是它
+        Err(err @ GatewayError::Error { .. }) => {
+            eprintln!("互调未被执行：{err}");
+            return Ok(());
+        }
+        // Rpc / Unauthenticated 按远端故障处理（凭证被拒时骨架已在后台重注册）
+        Err(err) => return Err(err),
+    };
+    let payload = envelope::payload_json(&out);
+    let _ = payload; // 下游返回的 JSON 载荷，业务上从这里取结果
+
+    // ---- 异步发布：投给 flow 就返回，拿不到处理结果 ----
+    if let Some(state) = state {
+        // publish 的信封要「新起步」：message_id 是总线的幂等键（at-least-once 投递
+        // 靠它去重），复用当前信封的 id 会让下游把「新发布的一条」当成「已处理过的
+        // 那条」去重掉。SDK 没有公开的 ULID 助手，这里用当前 id 加后缀演示；真实
+        // 业务用业务单号或自己的 id 生成器都行，唯一即可。
+        let event = match envelope::with_payload_json(
+            env,
+            serde_json::json!({ "text": "@@name@@ 触发的事件" }),
+        ) {
+            Ok(mut event) => {
+                event.message_id = format!("{}-evt", env.message_id);
+                event
+            }
+            Err(err) => {
+                eprintln!("载荷打包失败：{err:?}");
+                return Ok(());
+            }
+        };
+        match state.publish("目标flow名", event).await {
+            // 受理了：run_id 是这次 flow 执行的标识，拿它去链路里查「后来怎么样了」
+            Ok(run_id) => eprintln!("已触发下游 flow（run_id={run_id}）"),
+            // 被防环/链深/配额拦下是业务裁决，重试同一条多半还是被拒
+            Err(err) => eprintln!("发布被拒：{err}"),
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    // 本 example 不能独立运行（见模块注释）：GatewayClient 的构造函数是 SDK
+    // 私有的，example 进程里拿不到真的客户端。这里用 Option 把「拿不到」表达
+    // 出来——与 src/plugin.rs 的 state 槽同一款「注入前判空」模式，也顺便演示
+    // 了真实插件里你会怎么接线。None 时演示整段跳过，但 `if let` 分支编译器
+    // 看得见：SDK 升级改签名时这里会先红，这正是休眠演示存在的意义。
+    // （main 也不能省：examples/*.rs 没有 main 无法构建，而没人引用的函数会
+    // 触发 dead_code 警告。）
+    let gateway: Option<Arc<GatewayClient>> = None; // 真实代码：set_gateway 注入后存 Some
+    let state: Option<Arc<StateClient>> = None; // 真实代码：set_state 注入后存 Some
+    let env: Option<Envelope> = None; // 真实代码：handle(env) 的入参
+
+    if let (Some(gateway), Some(env)) = (gateway, env) {
+        demo_discovery(&gateway).await.expect("发现演示失败");
+        demo_invoke_and_publish(&gateway, state.as_deref(), &env)
+            .await
+            .expect("互调演示失败");
+    } else {
+        eprintln!(
+            "gateway_demo 是休眠演示：真正的调用发生在插件的 handle 里（见文件头注释）。\n\
+             这里没有可用的 GatewayClient（它由骨架在注册成功后注入），演示跳过。"
+        );
+    }
+}

@@ -121,6 +121,15 @@ pub async fn ingress(
     let trace_id = trace_id_from(&headers);
     let traceparent = crate::trace::format_traceparent(&trace_id, &crate::trace::new_span_id());
 
+    // Bearer 直传验过的平台登录态（契约键见 `hub_core::MAS_TOKEN_META`）：随信封
+    // meta 带给下游插件，嵌入场景下 dc-dict 这类需要登录态的插件才端到端可用。
+    // **Cookie 形态不透传**：那是 4A 会话，对要平台登录态的下游说不通——
+    // 与 MCP 面同一约定（那边的来源是 login 缓存，这里的来源是请求自带并验过的 token）。
+    // 必须在 subject 被 move 走之前取出来（envelope 构造会消耗 authenticated）。
+    let mas_token = authenticated
+        .as_ref()
+        .and_then(|Extension(subject)| subject.bearer_token.clone());
+
     let mut envelope = Envelope {
         message_id: message_id.clone(),
         trace_id: trace_id.clone(),
@@ -144,6 +153,14 @@ pub async fn ingress(
         }),
         ..Default::default()
     };
+
+    // 登录态注入。**没有登录态就不注入**——空壳键会让插件把「没有」误判成
+    // 「有但为空」，那与 MCP 面的语义必须一字不差。
+    if let Some(token) = mas_token {
+        envelope
+            .meta
+            .insert(hub_core::MAS_TOKEN_META.to_string(), token);
+    }
 
     // 装得下就内联，装不下走引用通道——插件拿到的信封里只有一个 uri
     let payload_ref = crate::payload::attach(&state.store, &mut envelope, payload).await?;

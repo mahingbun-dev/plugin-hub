@@ -1,0 +1,122 @@
+/**
+ * @@name@@ 的插件互调与发现演示（M6）——**休眠代码**，不接线到插件主流程。
+ *
+ * `src/main.ts` 不 import 它：它的作用是「编译期演示」，`npm run typecheck`
+ * （tsc --noEmit）会把它编到，SDK 升级改了签名时这里会先红，而不是等插件
+ * 作者抄过去才发现编不过。函数都 `export`：既是给外部调用的入口，也保证
+ * 将来有人打开 noUnusedLocals 时不会因为「没人用」被误报。
+ *
+ * **怎么拿到 GatewayClient**：不要自己 `new`（构造它要 gRPC 客户端与凭证，
+ * 凭证只有骨架 `run()` 拿得到）。实现 `GatewayAware` 的 `setGateway`，骨架会在
+ * **每次注册成功后**注入（与 `StateAware.setState` 同款约定）：
+ *
+ * ```ts
+ * class MyPlugin implements Plugin, StateAware, GatewayAware {
+ *   private state?: StateClient
+ *   private gateway?: GatewayClient
+ *
+ *   setState(state: StateClient): void { this.state = state }
+ *   setGateway(gateway: GatewayClient): void { this.gateway = gateway }
+ *
+ *   async handle(ctx: CallContext, env: Envelope): Promise<Envelope> {
+ *     if (this.gateway) await demoInvokeAndPublish(this.gateway, this.state, env)
+ *     // ……
+ *   }
+ * }
+ * ```
+ */
+
+import {
+  InvokeFailed,
+  InvokeRejected,
+  newEnvelope,
+  withPayloadJSON,
+  GatewayClient,
+  type Envelope,
+  type StateClient,
+} from '@@sdk_module@@'
+
+/**
+ * 发现三件套：现在能调谁、谁在产/消某条消息、目标插件吃什么吐什么。
+ *
+ * 都只从中台取，别旁路维护一份硬编码名单——那份名单会在别人改契约的
+ * 第一个小时里过时。
+ */
+export async function demoDiscovery(gateway: GatewayClient): Promise<void> {
+  // ① 在线插件清单（includeOffline=false 只列有健康实例的）。
+  // 排查「我声明的上游为什么调不到」时传 true，把离线的也带出来看。
+  const plugins = await gateway.listPlugins()
+  for (const p of plugins.plugins) {
+    // 演示只打印；真实用法是从清单里找目标插件/版本
+    console.log(`插件 ${p.name}@${p.latestVersion}（${p.online ? '在线' : '离线'}）`)
+  }
+
+  // ② 消息类型 → 生产者 / 消费者。`google.protobuf.Struct`
+  // 就是「直接调用的 JSON 载荷」，看谁接受它就知道谁能被 agent 直接调。
+  const endpoints = await gateway.describeMessage('google.protobuf.Struct')
+  console.log(
+    `Struct 的生产者 ${endpoints.producers.length} 个、消费者 ${endpoints.consumers.length} 个`,
+  )
+
+  // ③ 目标插件的契约：调别人之前先看它吃什么、吐什么。
+  // version 空串 = 最新已注册版本；多版本共存时锁版本是更稳的选择。
+  const contract = await gateway.getContract('目标插件名')
+  console.log(`目标契约 ${contract.name}@${contract.version}，可调用名单 ${contract.invokes.length} 条`)
+}
+
+/**
+ * 同步互调 + 异步发布的演示。三个参数都是插件 `handle` 里现成的东西：
+ * 客户端来自 `setGateway` 注入、state 来自 `setState`、信封就是本次处理的入参。
+ */
+export async function demoInvokeAndPublish(
+  gateway: GatewayClient,
+  state: StateClient | undefined,
+  env: Envelope,
+): Promise<void> {
+  // ---- 同步互调：要下游的处理结果、愿意同步等 ----
+  //
+  // currentEnvelope 传**当前正在处理的信封**：trace 从上游贯通到下游，互调链
+  // （meta 的 `hub.call_chain`）原样带下去让防环生效。链是**原样复制**的——
+  // 不要自己往链上追加自己，中台在整备时会把本次 caller（按凭证反查的那个）
+  // 追加进去，SDK 抢着做会让防环与审计的判断对象出错。
+  try {
+    const out = await gateway.invokePlugin('目标插件名', {
+      payloadJSON: { text: '来自 @@name@@ 的互调' },
+      currentEnvelope: env,
+      timeoutMs: 30_000, // 不填由中台给默认预算兜底
+      // version: '1.2.0', // 锁版本的互调（缺省调最新已注册版本）
+    })
+    // HANDLED 时拿到下游的信封，载荷从这里取（本演示不使用返回值）
+    console.log('互调成功，下游已处理')
+    void out
+  } catch (err) {
+    if (err instanceof InvokeRejected) {
+      // REJECTED 是下游校验器的**意见**：issues 能定位到具体字段，改数据重试有意义
+      console.log(`被目标插件拒绝：${err.reason}（${err.issues.length} 条问题）`)
+    } else if (err instanceof InvokeFailed) {
+      // ERROR 是中台/下游的**裁决**（未声明 invokes、超配额、成环、链深超限、
+      // 下游出错……）：重试同一条请求大概率还是它
+      console.log(`互调未被执行：${err.reason}`)
+    } else {
+      // gRPC 层故障（网络、未鉴权……）原样上抛；凭证被拒时骨架已在后台重注册
+      throw err
+    }
+    return
+  }
+
+  // ---- 异步发布：投给 flow 就返回，拿不到处理结果 ----
+  if (state) {
+    // publish 的信封用 newEnvelope()「新起步」：message_id 是总线的幂等键
+    // （at-least-once 投递靠它去重），复用当前信封的 id 会让下游把「新发布的一条」
+    // 当成「已处理过的那条」去重掉。
+    const event = withPayloadJSON(newEnvelope(), { text: '@@name@@ 触发的事件' })
+    try {
+      // 受理了：runId 是这次 flow 执行的标识，拿它去链路里查「后来怎么样了」
+      const runId = await state.publish('目标flow名', event)
+      console.log(`已触发下游 flow（run_id=${runId}）`)
+    } catch (err) {
+      // 被防环/链深/配额拦下是业务裁决（PublishRejected），重试同一条多半还是被拒
+      console.log(`发布被拒：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+}

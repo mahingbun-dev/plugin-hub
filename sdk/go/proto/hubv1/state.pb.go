@@ -682,7 +682,7 @@ const file_hub_v1_state_proto_rawDesc = "" +
 	"\x05KvPut\x12\x14.hub.v1.KvPutRequest\x1a\x15.hub.v1.KvPutResponse\x12=\n" +
 	"\bKvDelete\x12\x17.hub.v1.KvDeleteRequest\x1a\x18.hub.v1.KvDeleteResponse\x127\n" +
 	"\x06KvScan\x12\x15.hub.v1.KvScanRequest\x1a\x16.hub.v1.KvScanResponse\x12:\n" +
-	"\aPublish\x12\x16.hub.v1.PublishRequest\x1a\x17.hub.v1.PublishResponseBIZGgithub.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
+	"\aPublish\x12\x16.hub.v1.PublishRequest\x1a\x17.hub.v1.PublishResponseB>Z<github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
 
 var (
 	file_hub_v1_state_proto_rawDescOnce sync.Once

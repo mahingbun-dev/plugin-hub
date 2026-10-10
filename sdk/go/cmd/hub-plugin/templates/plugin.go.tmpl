@@ -86,6 +86,10 @@ func (p *Plugin) Manifest() *hubv1.PluginManifest {
 			{FqName: hubkit.StructFQName},
 		},
 
+		// 插件互调的授权声明（M6）：要经中台调用其他插件（见 gateway_example.go）
+		// 时在这里加——Invokes: []string{"目标插件名"}。declared 策略下声明了才会
+		// 放行调用；默认不声明，声明属于契约变更，记得升版本号。
+
 		// 暴露给 agent 的能力。它会聚合进中台统一的 MCP 工具面，名字是
 		// `插件名__工具名`（跨插件重名不冲突）——注册成功后 agent 拉一次
 		// tools/list 就能看见并调用，中台不用重启。

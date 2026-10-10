@@ -1,0 +1,118 @@
+package main
+
+// 插件互调与发现（M6）的休眠演示：能编译、不接线——plugin.go 的 Handle 一行都不用它。
+// 真要用互调时，把这里的调用抄进业务代码即可。
+//
+// 为什么单独放一个文件而不是并进 plugin.go：互调不是每个插件的主业，混进插件体
+// 会把「接入必读的最小代码」撑大一截；而示例的价值在「照着抄」，放哪都一样。
+//
+// 三件事各一个函数，按依赖顺序读：发现（GatewayExampleDiscover）→ 同步互调
+// （GatewayExampleInvoke）→ 异步发布（GatewayExamplePublish）。
+// 完整文档见中台仓库 docs/plugin-onboarding.md；可跑起来的两插件互调示例见
+// 中台仓库 examples/ping-chain。
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"@@sdk_module@@/hubkit"
+	"@@sdk_module@@/proto/hubv1"
+)
+
+// GatewayExampleDiscover 演示发现：谁在线（ListPlugins）、某个消息类型由谁生产/消费
+// （DescribeMessage）。
+//
+// 用它回答「该调谁」，不要旁路维护硬编码的下游名单——那份名单一定会跟注册表漂移。
+// gateway 由骨架在**每次注册成功后**注入（见 plugin.go 的 SetState，互调这路是
+// hubkit.GatewayAware 的 SetGateway，本模板没接线，抄的时候记得加上）。
+func GatewayExampleDiscover(ctx context.Context, gateway *hubkit.GatewayClient) error {
+	// 只列在线（有健康实例）的插件；传 true 会附上离线插件
+	plugins, err := gateway.ListPlugins(ctx, false)
+	if err != nil {
+		return fmt.Errorf("ListPlugins 失败: %w", err)
+	}
+	for _, p := range plugins {
+		fmt.Printf("在线: %s（最新版本 %s，%d 个健康实例）\n",
+			p.GetName(), p.GetLatestVersion(), p.GetInstanceCount())
+	}
+
+	// 消息类型 → 生产者/消费者。fq_name 与 manifest 契约同口径；
+	// 两边都查无时返回空响应而不是报错——「没人生产/消费它」本身就是有效答案
+	known, err := gateway.DescribeMessage(ctx, hubkit.StructFQName)
+	if err != nil {
+		return fmt.Errorf("DescribeMessage 失败: %w", err)
+	}
+	for _, ep := range known.GetProducers() {
+		fmt.Printf("google.protobuf.Struct 的生产者: %s %s\n", ep.GetPlugin(), ep.GetVersion())
+	}
+	return nil
+}
+
+// GatewayExampleInvoke 演示同步互调：经中台调用另一个插件，拿回它处理后的信封。
+// 插件之间**不直连**——直连会绕过中台的鉴权、审计、熔断与限额，所以一律 A→中台→B。
+//
+// CurrentEnvelope 传「我正在处理的信封」是这段里最关键的一行：SDK 会复制它的
+// trace_id/run_id/node_id 让整条链落进同一个 trace，并把防环链
+// （meta["hub.call_chain"]）**原样**带上——不要自己往链里追加自己，追加 caller
+// 是中台代调时做的，客户端抢着做会把链写错（链的语义是「已处理过该消息的插件」）。
+// 不传它则是一次顶层发起的全新调用：新 trace、不带链。
+func GatewayExampleInvoke(
+	ctx context.Context,
+	gateway *hubkit.GatewayClient,
+	env *hubv1.Envelope,
+) (*hubv1.Envelope, error) {
+	downstream, err := gateway.InvokePlugin(ctx, "目标插件名", hubkit.InvokeOptions{
+		// 留空 = 目标的最新已注册版本
+		Version: "",
+		// 本次调用的预算。它会落进信封 deadline，与 CurrentEnvelope 的 deadline 取较早者
+		Timeout: 30 * time.Second,
+		// trace 贯通与防环链都靠它，见函数注释
+		CurrentEnvelope: env,
+		PayloadJSON:     map[string]any{"text": "hello"},
+	})
+	if err != nil {
+		// REJECTED / ERROR 是**业务结果**，SDK 把它们翻成了类型化错误——
+		// 调用方按类型分支，而不是去解析错误字符串
+		var rejected *hubkit.InvokeRejected
+		if errors.As(err, &rejected) {
+			// 目标插件的校验器拒绝：issues 的 path 能定位到具体字段，改数据后可以重试
+			return nil, fmt.Errorf("被目标插件拒绝: %s（%d 个问题）", rejected.Reason, len(rejected.Issues))
+		}
+		var failed *hubkit.InvokeFailed
+		if errors.As(err, &failed) {
+			// 中台拦下（未声明授权、超配额、成环、链深超限）或下游出错：
+			// 按 reason 区分「改逻辑」与「退避重试」——盲目重试没有意义
+			return nil, fmt.Errorf("互调失败: %s", failed.Reason)
+		}
+		// 走到这里的只剩基础设施故障（中台不可达、未鉴权），原样上抛
+		return nil, err
+	}
+	return downstream, nil
+}
+
+// GatewayExamplePublish 演示异步发布：把一条信封投递给目标 flow，触发下游编排。
+// 拿不到业务结果（异步），要结果就走上面的 InvokePlugin。
+//
+// Publish 挂在 StateClient 名下而不是 GatewayClient：它是「写总线」而不是「调插件」，
+// 与状态共用同一张凭证。信封用 hubkit.NewEnvelope 起步（message_id/trace_id 已配好），
+// 载荷再用 WithPayloadJSON 装。
+func GatewayExamplePublish(ctx context.Context, state *hubkit.StateClient, target string) (string, error) {
+	env, err := hubkit.WithPayloadJSON(hubkit.NewEnvelope(), map[string]any{"text": "hello"})
+	if err != nil {
+		return "", err
+	}
+
+	runID, err := state.Publish(ctx, target, env)
+	if err != nil {
+		var rejected *hubkit.PublishRejected
+		if errors.As(err, &rejected) {
+			// 未受理是业务结果（防环、超限、目标 flow 不存在），reason 会说明原因——
+			// 该改目标或改逻辑，退避重试没有意义
+			return "", fmt.Errorf("中台未受理 Publish: %s", rejected.Reason)
+		}
+		return "", err
+	}
+	return runID, nil
+}

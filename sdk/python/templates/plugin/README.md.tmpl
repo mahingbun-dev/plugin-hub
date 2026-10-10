@@ -189,3 +189,25 @@ export GRPC_DEFAULT_SSL_ROOTS_FILE_PATH=/ca/ca.crt
 
 （Go 侧在 macOS 上不读 `SSL_CERT_FILE`，这是两门语言少数不一致的地方之一；
 在**开发机上自测跨机接入**时，把插件跑在 Linux 容器里可以绕开这一整类问题。）
+
+<!-- m6-intercall-start -->
+## 插件互调与发现（M6）
+
+插件之间不直连：同步互调（`invoke_plugin`——拿得到下游的处理结果）与发现三件套
+（`list_plugins` / `describe_message` / `get_contract`）都经中台的 PluginGateway
+代调；异步发布（`publish`——投给 flow 就返回、拿不到处理结果）走 HubState 那条
+连接。客户端不用自己构造：覆写 `Plugin.set_gateway`，骨架在每次注册成功后注入，
+凭证、401 自愈、重注册全由骨架管。
+
+`gateway_example.py` 是一份**休眠演示**（发现 + 同步互调 + 异步发布，编译通过、
+不接线到主流程），要用时把函数挪进 `plugin.py` 即可。互调时传当前信封
+（`invoke_plugin` 的 `current_envelope`）= trace 贯通 + 链路防环；互调链
+（meta 的 `hub.call_chain`）由中台维护，**不要自己往里追加自己**。
+
+要调别的插件前先确认中台策略：`HUB_PLUGIN_CALL_POLICY` 为 `declared` 时，manifest
+必须声明 `invokes` 名单（`plugin.py` 的 manifest 里有注释示例），名单外一律拒绝；
+`allow`（缺省）不限制。配额与防环由中台兜底：每插件每分钟 60 次互调、调用链深上限 8。
+
+完整背景见 plugin-hub 仓库的 `docs/plugin-onboarding.md` 与 `examples/ping-chain`。
+<!-- m6-intercall-end -->
+

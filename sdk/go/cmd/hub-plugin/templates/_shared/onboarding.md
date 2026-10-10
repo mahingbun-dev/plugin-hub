@@ -126,3 +126,13 @@ HubState、不做心跳超时摘除**。所以涉及这三点的结论，在 moc
   中台会拒绝「同号不同契约」的注册。
 - **预算来自信封**：信封带着绝对 deadline 逐跳递减。紧张时应提前放弃，
   而不是把时间耗光后靠上层超时兜底——那样调用方连「为什么慢」都看不出来。
+
+## 插件互调与发现（M6）
+
+- **互调/发现**：实现可选接口 `SetGateway(c *hubkit.GatewayClient)` 接收注入（注册成功后每次都会调），
+  handle 里 `c.InvokePlugin(ctx, "目标插件", hubkit.InvokeOptions{PayloadJSON: …, CurrentEnvelope: env})`
+  同步互调——走中台 A→hub→B，别直连；`c.ListPlugins / DescribeMessage / GetContract` 查在册插件与契约。
+- **发布**：`SetState` 注入的 `StateClient` 上 `Publish(ctx, target, env)` 异步触发 flow（拿不到下游结果，要结果走互调）；
+  信封以 `hubkit.NewEnvelope()` 起步、`hubkit.WithPayloadJSON` 装载荷。
+- **授权**：manifest 加 `Invokes: []string{"目标插件"}` 声明你要调谁——`declared` 策略下未声明的调用会被拒，
+  不调别的插件就别声明。完整可跑的例子见仓库 `examples/ping-chain`。

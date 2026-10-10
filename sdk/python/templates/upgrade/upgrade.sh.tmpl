@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# @@name@@ 的 M6（插件互调与发现）升级脚本。
+#
+# 幂等：每个动作都是「不在才写」，重复跑只有第一次有写入；已升级过的工程再跑
+# 只会打印一遍 SKIP 与检查结果。本脚本**只新增文件、不改已有文件**——存量工程
+# 必然已经漂移，改已有文件（打补丁）一定会跟开发者的本地改动打架。
+#
+# 用法（在插件工程根目录下）：
+#   bash upgrade.sh           # 有未提交改动时会要求确认
+#   bash upgrade.sh --force   # 跳过确认
+set -euo pipefail
+
+# 定位插件项目根：就是本脚本所在目录（hub-scaffold upgrade / 手工解压都把三件套
+# 放在工程根）。不取 ${PWD}——允许从别处 `bash 工程根/upgrade.sh` 调进来。
+cd "$(dirname "$0")"
+
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
+
+# ---------------------------------------------------------------- 1) 前置
+
+# 工作区不干净时要求确认。确认不了（不在 git 仓库里，比如刚解压的包）就直接放行：
+# 本脚本不覆盖任何已有文件，风险本来就有限，卡死在「没法确认」上只会让人 --force 成瘾。
+if [ "$FORCE" != "1" ]; then
+    if dirty="$(git status --porcelain 2>/dev/null)" && [ -n "$dirty" ]; then
+        echo "⚠️  工作区有未提交的改动（本脚本只新增文件、不改已有文件，但仍建议先提交）："
+        echo "$dirty"
+        printf "继续吗？[y/N] "
+        read -r answer || answer=""
+        case "$answer" in
+        y | Y) ;;
+        *) echo "已取消。先提交或 stash，或用 --force 跳过这个确认。" ; exit 1 ;;
+        esac
+    fi
+fi
+
+echo "==> @@name@@：M6 升级开始（工程根：${PWD}）"
+
+# ---------------------------------------------------------------- 2) ADD
+
+# gateway_example.py 的规范位置就是工程根（Python 门），与本脚本同级——落盘这一步
+# 已由 hub-scaffold upgrade / 手工解压完成，这里只核实在不在。
+if [ -f gateway_example.py ]; then
+    echo "SKIP gateway_example.py（已在规范位置）"
+else
+    echo "✗ gateway_example.py 不在：升级包三件套被拆散了（它应与本脚本同级）。"
+    echo "  重新下载 plugin-hub-python-upgrade-@@name@@.zip，解压到工程根后再跑。"
+    exit 1
+fi
+
+# ---------------------------------------------------------------- 3) README
+
+# 无 marker 则把 M6 小节追加到 README 末尾；README 不存在则创建带 marker 的新文件。
+# 小节内容与「新生成工程」的 README 逐字相同——marker 是幂等的锚点，也是两边
+# 形状一致的凭证。
+MARKER="m6-intercall-start"
+if [ -f README.md ] && grep -q "$MARKER" README.md; then
+    echo "SKIP README.md 的 M6 小节（marker 已在）"
+else
+    echo "ADD  README.md 的 M6 小节"
+    cat >>README.md <<'M6_SECTION'
+
+<!-- m6-intercall-start -->
+## 插件互调与发现（M6）
+
+插件之间不直连：同步互调（`invoke_plugin`——拿得到下游的处理结果）与发现三件套
+（`list_plugins` / `describe_message` / `get_contract`）都经中台的 PluginGateway
+代调；异步发布（`publish`——投给 flow 就返回、拿不到处理结果）走 HubState 那条
+连接。客户端不用自己构造：覆写 `Plugin.set_gateway`，骨架在每次注册成功后注入，
+凭证、401 自愈、重注册全由骨架管。
+
+`gateway_example.py` 是一份**休眠演示**（发现 + 同步互调 + 异步发布，编译通过、
+不接线到主流程），要用时把函数挪进 `plugin.py` 即可。互调时传当前信封
+（`invoke_plugin` 的 `current_envelope`）= trace 贯通 + 链路防环；互调链
+（meta 的 `hub.call_chain`）由中台维护，**不要自己往里追加自己**。
+
+要调别的插件前先确认中台策略：`HUB_PLUGIN_CALL_POLICY` 为 `declared` 时，manifest
+必须声明 `invokes` 名单（`plugin.py` 的 manifest 里有注释示例），名单外一律拒绝；
+`allow`（缺省）不限制。配额与防环由中台兜底：每插件每分钟 60 次互调、调用链深上限 8。
+
+完整背景见 plugin-hub 仓库的 `docs/plugin-onboarding.md` 与 `examples/ping-chain`。
+<!-- m6-intercall-end -->
+M6_SECTION
+fi
+
+# ---------------------------------------------------------------- 4) Python 门专属
+
+# hubkit 的升级路径：镜像构建时 COPY ./sdk 自动带上新版——部署走镜像时以基础镜像
+# 为准，本地副本只是开发用。这里检查本地副本有没有互调模块（M6 的标志物）。
+if [ -f sdk/hubkit/gateway.py ]; then
+    echo "✓ ./sdk/hubkit/gateway.py 在——本地 hubkit 副本已带互调能力（M6）"
+elif [ -d sdk/hubkit ]; then
+    echo "⚠️  ./sdk/hubkit 存在但没有 gateway.py——本地副本是 M6 之前的。"
+    echo "    hubkit 由镜像构建 COPY 自动升级，以基础镜像为准；本地开发请重新下载插件工程包同步 ./sdk"
+else
+    echo "ℹ️  本地没有 ./sdk 副本（hubkit 装在 venv 或镜像里）：镜像构建 COPY 自动升级，以基础镜像为准"
+fi
+
+# ---------------------------------------------------------------- 5) 检查清单
+
+cat <<'CHECKLIST'
+
+==> 检查清单（升级后逐条过）：
+
+  1. 构建与测试：python -m compileall -q . && python -m pytest -q
+  2. 互调授权：要经中台调用其他插件时，在 manifest 里声明
+     invokes=["目标插件名"]（见 plugin.py 构造处的注释示例）；
+     declared 策略下声明了才会放行，声明属于契约变更，记得升版本号。
+  3. 配额与防环：互调每插件每分钟 60 次、调用链深度上限 8。
+     invoke_plugin 记得传 current_envelope（当前信封）——trace 才能贯通、
+     防环链才能带上（不要自己往链里追加自己，那是中台的事）。
+  4. 示例与排错：gateway_example.py 三段演示（发现/互调/发布）；
+     细节见 UPGRADE.md 与中台仓库 docs/plugin-onboarding.md。
+
+CHECKLIST
+echo "✓ M6 升级完成（幂等：再跑一遍只会全是 SKIP）"

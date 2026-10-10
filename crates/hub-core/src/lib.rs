@@ -4,7 +4,7 @@ pub mod auth;
 pub mod config;
 pub mod state;
 
-pub use auth::AuthenticatedSubject;
+pub use auth::{AuthenticatedSubject, MAS_TOKEN_META};
 pub use config::{Config, ConfigError};
 
 /// 服务名。健康检查、指标标签、日志字段统一使用，避免各处字面量漂移。

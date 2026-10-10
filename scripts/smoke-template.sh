@@ -140,6 +140,30 @@ render() {
     esac
 }
 
+# M6 互调示例文件在各门的规范落点（设计 §3.1 表格）。expect_files 与升级演练
+# 共用这一张表——两处各写一份的话，同事产出文件那天只会改到其中一处。
+gateway_example_path() {
+    case "$1" in
+    go) echo "gateway_example.go" ;;
+    python) echo "gateway_example.py" ;;
+    node) echo "src/gateway-example.ts" ;;
+    rust) echo "examples/gateway_demo.rs" ;;
+    csharp) echo "GatewayExample.cs" ;;
+    esac
+}
+
+# 升级包里示例**素材**的落盘名（hub-scaffold upgrade 解到工程根）。node/rust 的
+# 素材落在根、规范位置（src/、examples/）由 upgrade.sh 复制过去；其余三门素材
+# 落点就是规范位置。演练断言两边都要，时序不同（素材在 upgrade 后、规范位置在
+# upgrade.sh 后），所以单独立一张表
+upgrade_payload_path() {
+    case "$1" in
+    node) echo "gateway-example.ts" ;;
+    rust) echo "gateway_demo.rs" ;;
+    *) gateway_example_path "$1" ;;
+    esac
+}
+
 # 期望的产物文件集。**写死而不是扫目录**：模板少发一个文件正是要抓的东西，
 # 而扫目录再跟自己比是永远为真的。
 expect_files() {
@@ -151,6 +175,8 @@ expect_files() {
     rust) expected="AGENTS.md Dockerfile README.md Cargo.toml src/main.rs src/plugin.rs tests/conformance.rs" ;;
     csharp) expected="AGENTS.md Dockerfile README.md Plugin.cs Plugin.csproj Program.cs global.json tests/ContractTests.cs tests/Tests.csproj" ;;
     esac
+    # M6 互调示例（各门落点不同，见上面的表）
+    expected="$expected $(gateway_example_path "$lang")"
     for f in $expected; do
         [ -f "$dir/$f" ] || fail "[$lang] 产物里缺 $f"
     done
@@ -323,29 +349,25 @@ kill_plugin() {
 
 echo "==> 前置检查"
 
-# C# 的本地渲染器（其余四门有自己的脚手架）。不给就现构建一个，
-# 而不是静默少跑一门。
+# hub-scaffold 有两个消费者：C# 的渲染（它没有本地脚手架）与**所有语言**的 M6
+# 升级演练（upgrade 子命令只在它里面）。不给就现构建一个，而不是静默少跑一段。
 SCAFFOLD_BIN="${HUB_SCAFFOLD_BIN:-}"
 if [ -z "$SCAFFOLD_BIN" ]; then
     for cand in "$ROOT/target/debug/hub-scaffold" "$ROOT/target/release/hub-scaffold"; do
         [ -x "$cand" ] && SCAFFOLD_BIN="$cand" && break
     done
 fi
-case " $LANGS " in
-*" csharp "*)
-    if [ -z "$SCAFFOLD_BIN" ]; then
-        echo "==> 构建 hub-scaffold（C# 没有本地脚手架，用它渲染；与中台下载接口同一份代码）"
-        # 构不出来**不判失败**：离线 runner 里没有 cargo 依赖快照，那是环境问题而不是
-        # 模板的问题。但也不能假装 C# 验过了——下面那门会被整门跳过并说明。
-        if (cd "$ROOT" && cargo build -q -p hub-templates --bin hub-scaffold) >/dev/null 2>&1; then
-            SCAFFOLD_BIN="$ROOT/target/debug/hub-scaffold"
-        else
-            echo "    ⚠️  构建失败（多半是离线、且没有 cargo 依赖快照）——C# 这门会被跳过"
-        fi
+if [ -z "$SCAFFOLD_BIN" ]; then
+    echo "==> 构建 hub-scaffold（与中台下载接口同一份代码）"
+    # 构不出来**不判失败**：离线 runner 里没有 cargo 依赖快照，那是环境问题而不是
+    # 模板的问题。但也不能假装验过了——C# 那门与升级演练段会各自跳过并说明。
+    if (cd "$ROOT" && cargo build -q -p hub-templates --bin hub-scaffold) >/dev/null 2>&1; then
+        SCAFFOLD_BIN="$ROOT/target/debug/hub-scaffold"
+    else
+        echo "    ⚠️  构建失败（多半是离线、且没有 cargo 依赖快照）——C# 这门与升级演练会被跳过"
     fi
-    [ -n "$SCAFFOLD_BIN" ] && echo "    hub-scaffold: $SCAFFOLD_BIN"
-    ;;
-esac
+fi
+[ -n "$SCAFFOLD_BIN" ] && echo "    hub-scaffold: $SCAFFOLD_BIN"
 
 # ---------------------------------------------------------------- 1~3. 逐门语言
 
@@ -385,11 +407,14 @@ for lang in $LANGS; do
         fail "[$lang] 产物里有未替换的占位符"
     fi
 
-    # HTML 注释是维护者视角的话，不该发给开发者。**但 .csproj 例外**：那是 XML，
-    # 注释本来就长这样，而且里面写的是给开发者看的说明。
+    # HTML 注释是维护者视角的话，不该发给开发者。两个例外：**.csproj** 是 XML，
+    # 注释本来就长这样，而且里面写的是给开发者看的说明；**m6-intercall 两个
+    # marker** 是升级脚本的幂等锚点（README 追加靠它判断「小节已在」，见设计
+    # §3.2），机器要读的标记，不是给人看的话。
     html=$(grep -rn '<!--' "$dir" \
         --exclude-dir=sdk --exclude-dir=node_modules --exclude-dir=__pycache__ \
-        --exclude-dir='*egg-info' --exclude='*.csproj' 2>/dev/null || true)
+        --exclude-dir='*egg-info' --exclude='*.csproj' 2>/dev/null \
+        | grep -Ev 'm6-intercall-(start|end)' || true)
     if [ -n "$html" ]; then
         echo "$html" >&2
         fail "[$lang] 产物里有发给开发者的 HTML 注释（维护者视角的话不该进包）"
@@ -410,13 +435,188 @@ for lang in $LANGS; do
     fi
 done
 
-# ---------------------------------------------------------------- 4. L3（可选）
+# 升级后的构建复查：比 build() 轻——只确认「升级素材落进去之后工程还能编」，
+# 不重跑 L1（L1 验的是插件逻辑，与升级无关，首轮已过）。命令按设计 §4.5。
+rebuild_after_upgrade() {
+    local lang="$1" dir="$2" log="$WORK/$lang-rebuild.log"
+    case "$lang" in
+    go)
+        (cd "$dir" && go build ./...) >"$log" 2>&1 \
+            || { cat "$log" >&2; fail "[$lang] 升级后 go build 失败——升级产物让工程编不过了"; }
+        ;;
+    python)
+        (cd "$dir" && "$PYTHON_BIN" -m compileall -q .) >"$log" 2>&1 \
+            || { cat "$log" >&2; fail "[$lang] 升级后 compileall 失败"; }
+        ;;
+    node)
+        # node_modules 已由首轮 build 装好，这里只做类型检查
+        (cd "$dir" && npx tsc --noEmit) >"$log" 2>&1 \
+            || { tail -30 "$log" >&2; fail "[$lang] 升级后 tsc 没过"; }
+        ;;
+    rust)
+        # --all-targets：examples/ 里的互调示例也要编（升级演练会把它落进 examples/）
+        (cd "$dir" && cargo check --all-targets) >"$log" 2>&1 \
+            || { tail -30 "$log" >&2; fail "[$lang] 升级后 cargo check 没过"; }
+        # rust 门的既有门禁在这里同样成立：**不允许编译警告**——升级素材若带进
+        # 一段没人用的死代码，开发者会以为是模板坏了
+        if grep -q '^warning' "$log"; then
+            grep -A3 '^warning' "$log" >&2
+            fail "[$lang] 升级后编译有警告——升级素材里多半留了没人用的代码"
+        fi
+        ;;
+    csharp)
+        (cd "$dir" && dotnet build -v q --nologo) >"$log" 2>&1 \
+            || { grep -iv "NU1900" "$log" | tail -30 >&2; fail "[$lang] 升级后 dotnet build 失败"; }
+        ;;
+    esac
+}
+
+# ---------------------------------------------------------------- 4. 升级演练（M6 升级包）
+
+# 每门语言把渲染产物**回退成「M6 之前的旧工程」**再走升级通道：hub-scaffold
+# upgrade 落素材 → 断言落地与幂等 → 跑 upgrade.sh（README 追加）→ 构建复查。
+#
+# **为什么先做存量模拟**：渲染产物是新工程，模板已预置 gateway_example 与 README
+# 的 M6 小节——直接在它上面演练，upgrade 的写入路径全是 SKIP、README 追加分支
+# 永远不触发（csharp 升级包把 namespace 渲染坏的事故正是从这个盲区漏掉的：
+# 新模板预置的示例是拿正确的 --package 渲的，而升级通道有自己的渲染取值）。
+echo
+echo "==> 升级演练（M6 升级包）"
+
+# 演练到底跑没跑：结尾的总结按它说话，不许把跳过的段落报成已验
+UPGRADE_RAN=0
+if [ -z "$SCAFFOLD_BIN" ]; then
+    echo "    ⏭  整段跳过：拿不到 hub-scaffold（离线 runner 缺 cargo 依赖快照时会出现）"
+else
+    for lang in $LANGS; do
+        echo "-- [$lang]"
+        dir="$WORK/$lang"
+
+        # 渲染被跳过的门没有产物可演（csharp 无 scaffold 时会走到这里）
+        if [ ! -d "$dir" ]; then
+            echo "    ⏭  跳过：这门没有渲染产物"
+            continue
+        fi
+        gw="$(gateway_example_path "$lang")"
+
+        # 1) 存量模拟：删掉新模板预置的 gateway_example、把 README 的 M6 小节从
+        #    marker 起裁掉——得到一个「M6 之前的老工程」。README 先备份：它是
+        #    「升级后该恢复成什么样」的标准答案（新模板即真源）
+        rm -f "$dir/$gw"
+        # rust 的示例整个住在 examples/（新工程里那个目录只有它一个文件）
+        if [ "$lang" = "rust" ]; then rm -rf "$dir/examples"; fi
+        cp "$dir/README.md" "$WORK/$lang-readme-orig"
+        # 裁掉 marker 段并压掉尾部空行：老工程的 README 里没有 M6 小节，
+        # 结尾也不该悬着一段空行
+        sed '/<!-- m6-intercall-start -->/,$d' "$WORK/$lang-readme-orig" \
+            >"$WORK/$lang-readme-cut"
+        printf '%s\n' "$(cat "$WORK/$lang-readme-cut")" >"$dir/README.md"
+        grep -q 'm6-intercall-start' "$dir/README.md" \
+            && fail "[$lang] 存量模拟失败：README 的 marker 段没裁干净"
+
+        # 2) 落素材。演练目录名是语言名（$WORK/go），与插件名不同，必须显式给 --name。
+        #    csharp 刻意**不传 --package**：缺省路径会从存量工程的 csproj 探测
+        #    命名空间——真实存量工程走的正是这条路，传了反而把它绕开验不到
+        if ! up_out="$("$SCAFFOLD_BIN" upgrade "$lang" --dir "$dir" --name "$PLUGIN" \
+            2>"$WORK/$lang-upgrade.log")"; then
+            if grep -q '还没产出' "$WORK/$lang-upgrade.log"; then
+                # 并行产出期的过渡态：素材目录还没建。五门齐之后这条不该再出现，
+                # 所以它不是静默跳过，而是带着义务的明说
+                echo "    ⏭  跳过：升级素材还没产出（五门齐后这里必须绿）"
+                continue
+            fi
+            cat "$WORK/$lang-upgrade.log" >&2
+            fail "[$lang] hub-scaffold upgrade 失败"
+        fi
+        echo "$up_out" | sed 's/^/    /'
+        # 模拟的存量工程里三件套都不在：一个 ADD 都没有 = 写入路径没被跑到
+        echo "$up_out" | grep -q '^ADD' \
+            || fail "[$lang] 存量模拟后 upgrade 应有 ADD——写入路径没被验到"
+
+        # 3) 落地断言：三件套已落盘。node/rust 的示例素材先落在工程根，
+        #    规范位置（src/、examples/）由第 5 步的 upgrade.sh 复制过去
+        payload="$(upgrade_payload_path "$lang")"
+        [ -f "$dir/upgrade.sh" ] || fail "[$lang] 升级包没落 upgrade.sh"
+        [ -x "$dir/upgrade.sh" ] || fail "[$lang] upgrade.sh 没有可执行位——开发者第一步就得 chmod"
+        [ -f "$dir/UPGRADE.md" ] || fail "[$lang] 升级包没落 UPGRADE.md"
+        [ -f "$dir/$payload" ] || fail "[$lang] 升级包没落示例素材 $payload"
+
+        # 素材渲染干净：落盘的三个文件里不该有任何 @@（清单是全量已知的键，
+        # 残留说明渲染缺了取值——那种包发出去，说明里的 @@name@@ 会原样躺在那）
+        leftover2=$(grep -n '@@' "$dir/upgrade.sh" "$dir/UPGRADE.md" "$dir/$payload" 2>/dev/null || true)
+        [ -z "$leftover2" ] || { echo "$leftover2" >&2; fail "[$lang] 升级素材里有未渲染的占位符"; }
+
+        # 4) 幂等：第二次跑必须全是 SKIP、退出 0、打印「已是最新」
+        if ! up_out2="$("$SCAFFOLD_BIN" upgrade "$lang" --dir "$dir" --name "$PLUGIN" 2>&1)"; then
+            echo "$up_out2" >&2
+            fail "[$lang] 第二次 upgrade 应退出 0（幂等不是失败）"
+        fi
+        if echo "$up_out2" | grep -q '^ADD'; then
+            echo "$up_out2" >&2
+            fail "[$lang] 第二次 upgrade 还有 ADD——升级不幂等"
+        fi
+        echo "$up_out2" | grep -q '已是最新' || fail "[$lang] 全 SKIP 时应打印「已是最新，无需变更」"
+
+        # 5) upgrade.sh 是存量工程真正要跑的那一步（README 追加 + 门自检）。存量
+        #    模拟后 README 没有 marker，追加分支这次是真的会走到；演练目录不是
+        #    git 仓库，走它「确认不了就放行」那条路，--force 更直接
+        if ! (cd "$dir" && bash upgrade.sh --force) >"$WORK/$lang-upgradesh.log" 2>&1; then
+            cat "$WORK/$lang-upgradesh.log" >&2
+            fail "[$lang] upgrade.sh 执行失败"
+        fi
+        grep -q 'm6-intercall-start' "$dir/README.md" \
+            || fail "[$lang] upgrade.sh 没把 M6 小节追加进 README"
+        # 示例文件此刻必须都在规范位置：node 的 src/、rust 的 examples/ 由
+        # upgrade.sh 复制（第 3 步只验了素材落盘），其余三门素材落点即规范位置
+        [ -f "$dir/$gw" ] || fail "[$lang] gateway_example 没在规范位置（${gw}）"
+
+        # README 追加段与新模板逐字一致（设计 §3.2「新项目与升级后项目形状一致」）：
+        # marker 段从升级后的 README 与原始 README 各取一份比对——它同时兜住
+        # 「门内 README 模板与 upgrade.sh 的 heredoc 漂移」那一整类缺陷
+        sed -n '/<!-- m6-intercall-start -->/,/<!-- m6-intercall-end -->/p' \
+            "$dir/README.md" >"$WORK/$lang-section-new"
+        sed -n '/<!-- m6-intercall-start -->/,/<!-- m6-intercall-end -->/p' \
+            "$WORK/$lang-readme-orig" >"$WORK/$lang-section-orig"
+        cmp -s "$WORK/$lang-section-new" "$WORK/$lang-section-orig" || {
+            diff "$WORK/$lang-section-orig" "$WORK/$lang-section-new" >&2 || true
+            fail "[$lang] README 追加段与新模板的 marker 段不一致——模板与 upgrade.sh 的 heredoc 漂移了"
+        }
+
+        # 6) 追加幂等：第二次 upgrade.sh 必须 SKIP README，marker 仍恰好一个
+        if ! (cd "$dir" && bash upgrade.sh --force) >>"$WORK/$lang-upgradesh.log" 2>&1; then
+            cat "$WORK/$lang-upgradesh.log" >&2
+            fail "[$lang] 第二次 upgrade.sh 应幂等通过"
+        fi
+        marker_count="$(grep -c 'm6-intercall-start' "$dir/README.md" || true)"
+        [ "$marker_count" = "1" ] \
+            || fail "[$lang] README 里 m6-intercall-start 出现 $marker_count 次（应为 1）：追加不幂等"
+
+        # 7) 构建复查：升级把文件落进去之后，工程必须还能编
+        if [ "$(build_state "$lang")" = "ok" ]; then
+            rebuild_after_upgrade "$lang" "$dir"
+            echo "    ✓ 升级后构建复查通过"
+        else
+            echo "    ⏭  跳过升级后构建复查：首轮构建没跑成（原因见结尾台账）"
+        fi
+        # 到这里这门才算真正演练过（上面的 continue 都不算）
+        UPGRADE_RAN=1
+    done
+fi
+
+# ---------------------------------------------------------------- 5. L3（可选）
 
 if [ "$OFFLINE" = "1" ]; then
     echo
     echo "✓ 模板冒烟通过（**离线模式**）"
     echo "  已验：渲染 → 产物文件集 → 无残留占位符/HTML 注释 → AGENTS.md 含四道关"
     echo "        → 随包 SDK 在位且不含构建产物"
+    # 演练段可能整段被跳过（hub-scaffold 构不出来）：总结必须照实说，
+    # 把没跑的段落报成已验，这份报告就什么都证明不了了
+    if [ "$UPGRADE_RAN" = "1" ]; then
+        echo "        → 升级演练（存量模拟 → ADD 落地 → README 追加段与新模板逐字一致 → 幂等 → 无 @@，不含构建复查）"
+    else
+        echo "  ⚠️  升级演练没跑（拿不到 hub-scaffold）——本报告不含升级链路的任何验证"
+    fi
     echo "  未验：构建、L1 契约一致性、L3 真注册——离线 runner 取不到依赖源。"
     report_skips
     exit 0
@@ -453,13 +653,13 @@ for _ in $(seq 1 30); do
     sleep 1
 done
 curl -sf "http://127.0.0.1:$MOCK_HTTP_PORT/health" >/dev/null \
-    || fail "mock 中台没起来（$MOCK_HTTP_PORT）"
+    || fail "mock 中台没起来（${MOCK_HTTP_PORT}）"
 
 # 确认对面是 mock 而不是真中台：两者绑同一组端口，「注册成功了」这句日志
 # 两者都会打，但能证明的东西不同。这条判据是血换来的——真实发生过一次，
 # 有人拿着 mock 的结果当对真中台验过了。
 mock_name="$(curl -s "http://127.0.0.1:$MOCK_HTTP_PORT/health" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
-[ "$mock_name" = "hub-mock" ] || fail "对面不是 hub-mock（报的是 $mock_name）——先确认你在对谁验"
+[ "$mock_name" = "hub-mock" ] || fail "对面不是 hub-mock（报的是 ${mock_name}）——先确认你在对谁验"
 
 L3_DONE=""
 for lang in $LANGS; do
@@ -502,5 +702,10 @@ done
 
 echo
 echo "✓ 模板冒烟通过"
-echo "  已验：${L3_DONE# } 各走了一遍「渲染 → 产物干净 → 构建 → L1 → L3（真注册进 mock 中台）」"
+if [ "$UPGRADE_RAN" = "1" ]; then
+    echo "  已验：${L3_DONE# } 各走了一遍「渲染 → 产物干净 → 构建 → L1 → 升级演练（M6：存量模拟/落地/幂等/README 逐字一致）→ L3（真注册进 mock 中台）」"
+else
+    echo "  已验：${L3_DONE# } 各走了一遍「渲染 → 产物干净 → 构建 → L1 → L3（真注册进 mock 中台）」"
+    echo "  ⚠️  升级演练没跑（拿不到 hub-scaffold）——本报告不含升级链路的任何验证"
+fi
 report_skips

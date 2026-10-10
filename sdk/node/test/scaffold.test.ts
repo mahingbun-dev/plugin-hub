@@ -80,6 +80,8 @@ test('生成的工程干净且可解析', async () => {
       'Dockerfile',
       'README.md',
       'package.json',
+      // M6 的互调/发现休眠演示：与 main/plugin 同在 src/ 下，tsc 的 include 一并检查到
+      'src/gateway-example.ts',
       'src/main.ts',
       'src/plugin.ts',
       'test/plugin.test.ts',

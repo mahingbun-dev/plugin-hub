@@ -16,7 +16,10 @@
 mod pack;
 mod render;
 
-pub use pack::{PackError, archive_size, build_zip, download_filename};
+pub use pack::{
+    PackError, archive_size, build_upgrade_zip, build_zip, download_filename, upgrade_archive_size,
+    upgrade_download_filename,
+};
 pub use render::{
     KEY_HUB_ADDR, KEY_NAME, KEY_ONBOARDING, KEY_PACKAGE, KEY_SDK_MODULE, KEY_SDK_PATH, Values,
 };
@@ -104,6 +107,78 @@ pub fn shared_onboarding() -> Option<&'static str> {
     SHARED_ONBOARDING_SRC
 }
 
+/// 取一门语言的 M6 升级包素材：(输出路径, 模板原始字节)。
+///
+/// 素材由 `build.rs` 从各语言的 `templates/upgrade/` 目录**编译期嵌入**，发给
+/// **存量**插件工程补 M6（互调/发现）示例与升级脚本。与 [`find`] 的取值范围一致：
+/// 有几门语言就有几个条目。
+///
+/// 素材**允许缺失**（五门素材并行产出期的过渡态，`build.rs` 生成 `None`），但取用
+/// 一律报错——留空会让 CLI 静默落一个空包、让 HTTP 端点 200 一个空 zip，那比
+/// 「明确说这门还没有」糟得多。错误信息点两样东西：缺的是哪门、当前缺的还有哪些
+/// （缺的往往不止一门，一次说全省得逐门试）。
+pub fn upgrade_files(
+    lang_id: &str,
+) -> Result<&'static [(&'static str, &'static [u8])], TemplatesError> {
+    let Some((_, files)) = UPGRADE_SOURCES.iter().find(|(id, _)| *id == lang_id) else {
+        let known: Vec<&str> = UPGRADE_SOURCES.iter().map(|(id, _)| *id).collect();
+        return Err(TemplatesError::UnknownLang {
+            lang_id: lang_id.to_string(),
+            known,
+        });
+    };
+
+    files.ok_or_else(|| TemplatesError::MissingUpgrade {
+        lang_id: lang_id.to_string(),
+        missing: UPGRADE_SOURCES
+            .iter()
+            .filter(|(_, f)| f.is_none())
+            .map(|(id, _)| *id)
+            .collect(),
+    })
+}
+
+/// 升级包素材的取用错误。
+///
+/// 两种失败要分开：未知语言是调用方写错了，缺素材是这门语言还没产出（过渡态）。
+/// 混成一条的话，前者会误报成「中台没准备好」，后者会被当成「我拼错了语言名」。
+#[derive(Debug)]
+pub enum TemplatesError {
+    /// 不认识的语言标识。带上认得的清单——写错一个字母时，这条消息是唯一能自助的地方。
+    UnknownLang {
+        lang_id: String,
+        known: Vec<&'static str>,
+    },
+
+    /// 语言在册，但这门的 `templates/upgrade/` 素材还没产出。`missing` 列出当前
+    /// 缺素材的全部语言，一次说全。
+    MissingUpgrade {
+        lang_id: String,
+        missing: Vec<&'static str>,
+    },
+}
+
+impl std::fmt::Display for TemplatesError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownLang { lang_id, known } => write!(
+                f,
+                "没有 {lang_id} 这门语言的升级包素材（现有：{}）",
+                known.join(" / ")
+            ),
+            Self::MissingUpgrade { lang_id, missing } => write!(
+                f,
+                "{lang_id} 的升级包素材还没产出（templates/upgrade/ 缺失）。\
+                 当前缺素材的有：{}。这是五门素材并行产出期的过渡态，\
+                 五门齐之后不应再见到这条错误",
+                missing.join(" / ")
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TemplatesError {}
+
 impl Values {
     /// 按用户输入构造一份取值。
     ///
@@ -189,10 +264,11 @@ mod tests {
                 lang.display_name
             );
             for (path, _) in lang.files {
-                // _shared/ 是内联素材，不作为产物发给开发者
+                // _shared/ 是内联素材、upgrade/ 是发给存量工程的素材，
+                // 两者都不该出现在「新生成的工程」里
                 assert!(
-                    !path.starts_with("_shared/"),
-                    "{} 的 {path} 属于 _shared/，不该作为产物输出",
+                    !path.starts_with("_shared/") && !path.starts_with("upgrade/"),
+                    "{} 的 {path} 属于非产物目录，不该作为新工程的产物输出",
                     lang.display_name
                 );
                 assert!(
@@ -225,6 +301,114 @@ mod tests {
         let first = languages()[0];
         assert!(find(first.id).is_some());
         assert!(find("不存在的语言").is_none());
+    }
+
+    // ---------------------------------------------------------------- 升级素材
+
+    #[test]
+    fn 升级素材目录与语言清单同长同id() {
+        // build.rs 里已双向 panic 过，这里从**产物侧**再断言一次：万一有人绕过
+        // build.rs 手改生成物，缺一门意味着那门的升级包通道悄悄不存在——
+        // 下载页与 CLI 都会报「没有这门语言」，而不是「素材没就绪」。
+        let ids: Vec<&str> = UPGRADE_SOURCES.iter().map(|(id, _)| *id).collect();
+        for lang in languages() {
+            assert!(
+                ids.contains(&lang.id),
+                "{} 没有登记升级素材目录",
+                lang.display_name
+            );
+        }
+        assert_eq!(
+            ids.len(),
+            languages().len(),
+            "UPGRADE_SOURCES 与语言清单长度不一致：{ids:?}"
+        );
+    }
+
+    #[test]
+    fn 升级素材的清单与磁盘一致() {
+        // 与「嵌入的模板与磁盘上的模板一致」同一条理由：build.rs 的 rerun-if-changed
+        // 失效时，二进制里的素材是旧的而下载页照常出包——不逐字节比对发现不了。
+        // 目录表用 build.rs 生成的 UPGRADE_SOURCE_DIRS，不在测试里再抄一份表。
+        for (id, rel) in UPGRADE_SOURCE_DIRS {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+
+            // **素材存在才断言**：五门素材并行产出，缺的门先验证「报缺素材的错」，
+            // 不炸——门齐之后这个分支整段空过，Some 侧的比对自然覆盖五门。
+            if !dir.is_dir() {
+                let err = upgrade_files(id).unwrap_err();
+                assert!(
+                    matches!(err, TemplatesError::MissingUpgrade { .. }),
+                    "{id} 的素材目录不在磁盘上，upgrade_files 应报缺素材，实际 {err:?}"
+                );
+                continue;
+            }
+
+            let files = upgrade_files(id).unwrap();
+            assert!(!files.is_empty(), "{id} 的升级素材清单是空的");
+            for (output, embedded) in files {
+                let on_disk = std::fs::read(dir.join(format!("{output}.tmpl")))
+                    .unwrap_or_else(|e| panic!("读磁盘上的 {id}/{output}.tmpl 失败: {e}"));
+                assert_eq!(
+                    *embedded,
+                    on_disk.as_slice(),
+                    "{id}/{output} 的内容与嵌入二进制的不一致"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn 五门升级素材齐全_最终态断言() {
+        // **最终态断言**：五门素材都已产出，「目录允许缺失」的并行期容缺就只剩
+        // 一种合法形态——五门全 Some。上面「清单与磁盘一致」那条在目录不在时
+        // 验的是「报缺素材的错」而不是「必须齐」，于是删掉任意一门的
+        // templates/upgrade/ 它照样绿——那条测试防的是「嵌入与磁盘漂移」，
+        // 防不了「容缺逻辑变成永久缺门」（build.rs 注释与设计 §4.2 都写着
+        // 「最终五门必须齐」，但注释不会被 cargo test 执行）。
+        for lang in languages() {
+            let files = upgrade_files(lang.id).unwrap_or_else(|e| {
+                panic!(
+                    "{} 的升级素材缺失（{e}）。五门齐全是最终态：并行产出期的容缺\
+                     不应延续成永久缺门——要么把 {} 补回来，要么显式下线这门语言",
+                    lang.display_name, lang.id
+                )
+            });
+            assert!(
+                !files.is_empty(),
+                "{} 的升级素材清单是空的",
+                lang.display_name
+            );
+        }
+    }
+
+    #[test]
+    fn 未知语言的升级素材报错并列出认得的() {
+        let err = upgrade_files("不存在的语言").unwrap_err();
+        match &err {
+            TemplatesError::UnknownLang { known, .. } => {
+                assert!(
+                    !known.is_empty(),
+                    "认得的语言清单不该是空的——它就是报错时唯一能自助的地方"
+                );
+            }
+            other => panic!("应是未知语言错误，实际 {other:?}"),
+        }
+        assert!(err.to_string().contains("不存在的语言"));
+    }
+
+    #[test]
+    fn 缺素材的错误点名语言与目录() {
+        // 手工构造错误而不是真去取一门缺素材的语言：并行期哪门缺、什么时候补齐
+        // 都不由本仓库决定，断言「现在是 None」会在同事合入素材的那一刻假红。
+        let err = TemplatesError::MissingUpgrade {
+            lang_id: "rust".into(),
+            missing: vec!["rust", "csharp"],
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("rust"), "应点名缺素材的语言：{msg}");
+        assert!(msg.contains("csharp"), "缺的门要一次说全：{msg}");
+        assert!(msg.contains("templates/upgrade/"), "应指出素材目录：{msg}");
     }
 
     #[test]

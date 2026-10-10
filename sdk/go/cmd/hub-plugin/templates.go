@@ -33,6 +33,7 @@ var scaffoldFiles = []scaffoldFile{
 	{Template: "templates/go.mod.tmpl", Output: "go.mod"},
 	{Template: "templates/main.go.tmpl", Output: "main.go"},
 	{Template: "templates/plugin.go.tmpl", Output: "plugin.go"},
+	{Template: "templates/gateway_example.go.tmpl", Output: "gateway_example.go"},
 	{Template: "templates/plugin_test.go.tmpl", Output: "plugin_test.go"},
 	{Template: "templates/README.md.tmpl", Output: "README.md"},
 	{Template: "templates/AGENTS.md.tmpl", Output: "AGENTS.md"},

@@ -488,7 +488,7 @@ const file_hub_v1_envelope_proto_rawDesc = "" +
 	"\x14PAYLOAD_TYPE_REQUEST\x10\x01\x12\x16\n" +
 	"\x12PAYLOAD_TYPE_EVENT\x10\x02\x12\x18\n" +
 	"\x14PAYLOAD_TYPE_COMMAND\x10\x03\x12\x17\n" +
-	"\x13PAYLOAD_TYPE_RESULT\x10\x04BIZGgithub.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
+	"\x13PAYLOAD_TYPE_RESULT\x10\x04B>Z<github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
 
 var (
 	file_hub_v1_envelope_proto_rawDescOnce sync.Once

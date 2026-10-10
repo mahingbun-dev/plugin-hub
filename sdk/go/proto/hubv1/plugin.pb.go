@@ -840,7 +840,7 @@ const file_hub_v1_plugin_proto_rawDesc = "" +
 	"\bValidate\x12\x17.hub.v1.ValidateRequest\x1a\x18.hub.v1.ValidateResponse\x127\n" +
 	"\x06Handle\x12\x15.hub.v1.HandleRequest\x1a\x16.hub.v1.HandleResponse\x12?\n" +
 	"\fHandleStream\x12\x15.hub.v1.HandleRequest\x1a\x16.hub.v1.HandleResponse0\x01\x127\n" +
-	"\x06Health\x12\x15.hub.v1.HealthRequest\x1a\x16.hub.v1.HealthResponseBIZGgithub.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
+	"\x06Health\x12\x15.hub.v1.HealthRequest\x1a\x16.hub.v1.HealthResponseB>Z<github.com/mahingbun-dev/plugin-hub/sdk/go/proto/hubv1;hubv1b\x06proto3"
 
 var (
 	file_hub_v1_plugin_proto_rawDescOnce sync.Once

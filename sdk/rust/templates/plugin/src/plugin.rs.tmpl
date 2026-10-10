@@ -129,6 +129,12 @@ impl @@sdk_module@@::Plugin for Plugin {
                 requires_approval: false,
             }],
 
+            // 可调用的目标插件名（插件互调的权限名单）。**刻意不声明**：中台策略
+            // HUB_PLUGIN_CALL_POLICY 为 allow（缺省）时不看这个名单，声明了反而
+            // 把自己的调用面收窄；为 declared 时则必须声明，名单外一律拒绝。
+            // 真要互调时打开下面这行（并同步升版本号——同版本号的 manifest 不可变更）：
+            // invokes: vec!["目标插件名".to_string()],
+
             ..Default::default()
         }
     }

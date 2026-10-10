@@ -104,6 +104,8 @@ fn authz_config() -> AuthzConfig {
     AuthzConfig {
         plugin: "auth".to_string(),
         version: None,
+        // 集成测试里的闸门形态按用例需要开：默认关 = 与既有用例行为一致
+        mcp_login_gate: false,
     }
 }
 
@@ -496,4 +498,90 @@ async fn auth_插件不可达时返回_503_而不是降级(pool: PgPool) {
         "应当明确说是鉴权服务不可用（可重试），而不是 401（凭证有问题）或 403（权限不够）：{body}"
     );
     assert_eq!(body["error"], "auth_unavailable");
+}
+
+// ---------------------------------------------------------------- Bearer 直传
+
+/// 带 `Authorization: Bearer` 的请求。凭证匹配规则与 cookie 相同（子串）。
+async fn send_bearer(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    token: Option<&str>,
+) -> (StatusCode, Value, std::collections::HashMap<String, String>) {
+    use axum::http::header;
+
+    let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(token) = token {
+        builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    let request = builder.body(Body::empty()).expect("构造请求失败");
+
+    let response = app.clone().oneshot(request).await.expect("请求处理失败");
+    let status = response.status();
+    let headers: std::collections::HashMap<String, String> = response
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
+        .collect();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("读取响应体失败")
+        .to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        headers,
+    )
+}
+
+#[sqlx::test(migrations = "../hub-store/migrations")]
+async fn bearer_token直传_有效token认证成功(pool: PgPool) {
+    // 嵌入场景的新通道：调用方显式带平台登录态 token（MCP 客户端 headers 配置、
+    // 服务端转发），不必非得有浏览器 Cookie
+    let h = build(Store::from_pool(pool), Some(authz_config()));
+    let _fixture = with_auth_plugin(&h).await;
+
+    let (status, _, _headers) =
+        send_bearer(&h.app, "GET", "/admin/plugins", Some(COOKIE_ADMIN)).await;
+    assert_eq!(status, StatusCode::OK, "有效的 Bearer token 应认证成功");
+
+    // 无效 token：401 且 WWW-Authenticate 指到 Bearer——调用方才知道该换哪条通道
+    let (status, body, headers) =
+        send_bearer(&h.app, "GET", "/admin/plugins", Some("expired-token")).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "无效 token 应 401：{body}"
+    );
+    assert_eq!(body["error"], "unauthorized");
+    assert_eq!(
+        headers.get("www-authenticate").map(String::as_str),
+        Some("Bearer"),
+        "401 必须指明认证入口是 Bearer，否则调用方分不清该换 Cookie 还是换 token"
+    );
+}
+
+#[sqlx::test(migrations = "../hub-store/migrations")]
+async fn cookie与bearer同现时bearer优先(pool: PgPool) {
+    let h = build(Store::from_pool(pool), Some(authz_config()));
+    let _fixture = with_auth_plugin(&h).await;
+
+    // cookie 是编辑者、bearer 是管理员：听 bearer（显式传 token 意图明确，
+    // 是嵌入场景的新通道；cookie 是存量通道，两者同现听新的）
+    let request = Request::builder()
+        .method("GET")
+        .uri("/admin/plugins")
+        .header("cookie", format!("SESSION={COOKIE_EDITOR}"))
+        .header("authorization", format!("Bearer {COOKIE_ADMIN}"))
+        .body(Body::empty())
+        .expect("构造请求失败");
+    let response = h.app.clone().oneshot(request).await.expect("请求处理失败");
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Bearer 与 Cookie 同现时应听 Bearer（管理员通过）"
+    );
 }

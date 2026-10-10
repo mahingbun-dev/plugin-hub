@@ -74,6 +74,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # 经 nginx 对外提供 MCP 时必须配置（逗号分隔白名单；一旦配置即替换默认回环放行）
       HUB_MCP_ALLOWED_HOSTS: ${HUB_MCP_ALLOWED_HOSTS:-}
+      # 嵌入场景的传输层开关（逗号分隔 Origin 白名单）：嵌入方前端与 hub 跨
+      # origin（同站不同端口/子域）时浏览器要求服务端应答 CORS 头，带 Cookie 的
+      # 跨域 fetch 才放行。**留空 = 不挂 CORS 层**（同域反代部署零行为变化）。
+      # 刻意不支持 `*`：带凭证的 CORS 禁止通配 Origin，而嵌入要带的正是 Cookie。
+      HUB_CORS_ALLOWED_ORIGINS: ${HUB_CORS_ALLOWED_ORIGINS:-}
       # 跨机插件的可达地址（自报给中台），形如 https://hub.example.com:8094
       HUB_PLUGIN_PUBLIC_ADDR: ${HUB_PLUGIN_PUBLIC_ADDR:-}
       OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}

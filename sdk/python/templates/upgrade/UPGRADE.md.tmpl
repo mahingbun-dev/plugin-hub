@@ -1,0 +1,47 @@
+# @@name@@ 的 M6 升级说明（插件互调与发现）
+
+这个升级包给存量插件工程补上 M6（插件互调与发现）的东西。它**只新增文件、不改已有
+文件**——存量工程必然已经漂移，改已有文件的补丁一定会跟本地改动打架。
+
+三件套：
+
+| 文件 | 干什么 |
+|---|---|
+| `gateway_example.py` | 发现 / 同步互调 / 异步发布三段**休眠演示**：能编译、不接线，照着抄 |
+| `upgrade.sh` | 幂等升级脚本：核对 gateway_example、给 README 追加 M6 小节、做 Python 门自检 |
+| `UPGRADE.md` | 本文件：升级说明与检查清单 |
+
+## 怎么用
+
+```bash
+# 方式一：CLI（hub-scaffold 与中台下载接口同一份代码）
+hub-scaffold upgrade python --dir <工程根> --name @@name@@
+cd <工程根> && bash upgrade.sh
+
+# 方式二：手动——把 zip 解压出的三件套拷进工程根，然后
+bash upgrade.sh
+```
+
+`upgrade.sh` 是幂等的：每个动作都是「不在才写」，重复跑只有第一次有写入。
+
+## 升级后要检查什么
+
+1. **构建与测试**：`python -m compileall -q . && python -m pytest -q`
+   （`gateway_example.py` 参与编译，编不过说明手滑改坏了示例。）
+2. **SDK 副本带互调能力**：M6 的互调客户端是 `hubkit/gateway.py`。hubkit 由镜像
+   构建 COPY 自动升级——部署走镜像时以基础镜像为准；本地 `./sdk` 副本存在时
+   `upgrade.sh` 会检查它有没有 gateway.py，是旧的就重新下载插件工程包同步。
+3. **互调授权声明**：要经中台调用其他插件时，在 manifest 里声明
+   `invokes=["目标插件名"]`——declared 策略下声明了才会放行调用；声明属于契约
+   变更，记得升版本号。不实际互调就不用声明，示例文件不接线、不影响行为。
+4. **配额与防环**：互调每插件每分钟 60 次、调用链深度上限 8。`invoke_plugin`
+   记得传 `current_envelope`（当前信封）——trace 才能贯通、防环链才能带上；
+   不要自己往链里追加自己，那是中台代调时做的事。
+5. **README**：`upgrade.sh` 会把「插件互调与发现（M6）」小节追加到 README 末尾
+   （有 `m6-intercall-start` marker 就跳过）。
+
+## 更多
+
+- 接入与排错的完整文档：中台仓库 `docs/plugin-onboarding.md`
+- 可跑起来的两插件互调示例：中台仓库 `examples/ping-chain`
+- 五门语言都有同款升级包：中台下载接口 `GET /plugin-templates/python/upgrade-package?name=@@name@@`

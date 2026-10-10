@@ -12,6 +12,7 @@
 pub mod admin;
 pub mod authz;
 pub mod bus;
+pub mod cors;
 pub mod error;
 pub mod flows;
 pub mod governance;
@@ -22,6 +23,8 @@ pub mod payload;
 pub mod templates;
 pub mod trace;
 pub mod triggers;
+
+use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -90,6 +93,12 @@ pub struct ApiState {
     /// 列表接口里标出来，控制台据此提示开发者自行填写——**不猜**：地址填错是
     /// L3「中台接受注册」永远过不去的头号原因，而报错只有一句 connection refused。
     pub plugin_public_addr: Option<String>,
+
+    /// CORS 白名单（`HUB_CORS_ALLOWED_ORIGINS`，经 main 装配传入）。
+    ///
+    /// `None` = 不挂 CORS 层（同域反代部署的既有形态）。嵌入方前端与 hub
+    /// 跨 origin 但同站时配这里，浏览器才肯把 Cookie 带给跨域 fetch。
+    pub cors: Option<Vec<String>>,
 }
 
 impl ApiState {
@@ -102,12 +111,19 @@ impl ApiState {
             async_exec: None,
             authz: None,
             plugin_public_addr: None,
+            cors: None,
         }
     }
 
     /// 配上插件面对外地址。不配时下载的工程里留占位文字。
     pub fn with_plugin_public_addr(mut self, addr: Option<String>) -> Self {
         self.plugin_public_addr = addr;
+        self
+    }
+
+    /// 配上 CORS 白名单。`None` / 不调用 = 不挂 CORS 层。
+    pub fn with_cors(mut self, origins: Option<Vec<String>>) -> Self {
+        self.cors = origins;
         self
     }
 
@@ -155,6 +171,11 @@ pub fn api_router(state: ApiState) -> Router {
         .route(
             "/plugin-templates/{lang}/download",
             get(templates::download),
+        )
+        // M6 升级补丁包：发给存量插件工程。与 download 同属接入资料，同样不鉴权
+        .route(
+            "/plugin-templates/{lang}/upgrade-package",
+            get(templates::upgrade_package),
         )
         // 管理面。按设计无内置守卫，过渡期由 nginx 在部署层限制来源
         .route("/admin/plugins", get(admin::list_plugins))
@@ -226,7 +247,8 @@ pub fn router(system: SystemState, api: ApiState) -> Router {
 /// 不再依赖「记得给它补一层」这种约定。
 pub fn router_with_extras(system: SystemState, api: ApiState, extras: Router) -> Router {
     let authz_state = api.clone();
-    system_router(system).merge(
+    let cors_origins = api.cors.clone();
+    let router = system_router(system).merge(
         api_router(api)
             .merge(extras)
             // 鉴权在最外层（后加的 layer 先执行）：未认证的请求不该被读一遍 body。
@@ -235,5 +257,18 @@ pub fn router_with_extras(system: SystemState, api: ApiState, extras: Router) ->
                 authz_state,
                 authz::authorize,
             )),
-    )
+    );
+
+    // CORS 在鉴权**外面**（更晚 layer = 更先执行）：预检 OPTIONS 不带凭证，
+    // 必须由 CORS 层短路应答，否则先撞 401——浏览器拿不到预检结果，跨域嵌入
+    // 的带 Cookie fetch 全部失败。**条件挂载**：axum 的 layer 是类型级组合，
+    // 「空 Router 加 layer 再 merge」只会让中间件作用于空路由（等于没挂），
+    // 所以在这里按配置分叉整条链。没配白名单 = 不挂 = 同域反代零行为变化。
+    match cors_origins {
+        Some(origins) => router.layer(middleware::from_fn_with_state(
+            Arc::new(origins),
+            cors::handle,
+        )),
+        None => router,
+    }
 }

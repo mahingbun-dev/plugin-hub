@@ -183,6 +183,14 @@ pub struct AuthzConfig {
 
     /// 版本约束；`None` 表示跟随最新版本
     pub version: Option<String>,
+
+    /// MCP 登录闸门是否开启（与 hub-mcp 的 `HUB_MCP_LOGIN_GATE` 同源）。
+    ///
+    /// 开启时 `/mcp` 的**无凭证与无效凭证请求放行到工具面**，由闸门接管
+    /// （elicitation 弹窗 / 指引卡）——否则 MCP 客户端没有浏览器 Cookie，
+    /// HTTP 层 401 会把它死锁在会话建立之前，连 `login` 工具都调不到。
+    /// 关闭时 `/mcp` 与其余路径同样 401，行为与改造前完全一致。
+    pub mcp_login_gate: bool,
 }
 
 /// 鉴权中间件。
@@ -201,15 +209,34 @@ pub async fn authorize(
         Guard::Needs(scope) => scope,
     };
 
-    // 没有 Cookie 头就不用去问插件了——插件也会回一个「没带登录态」，
-    // 但那一趟是白跑的，而且会让「没登录」与「登录过期」在日志里长得一样
-    let Some(cookie) = cookie_of(&request) else {
+    // /mcp + 闸门开启 = 「HTTP 层让路、闸门接管」的形态。只对无凭证与无效凭证
+    // 生效（见下面两个分支）；**有效凭证照常认证**，闸门只是兜底不是旁路。
+    let mcp_gate_active = config.mcp_login_gate && request.uri().path() == "/mcp";
+
+    let Some(credential) = credential_of(&request) else {
+        if mcp_gate_active {
+            // 匿名进工具面：闸门会拦下插件调用并弹窗/给指引卡。
+            // tools/list、initialize 这类元操作本就要匿名可达——agent 得先
+            // 看到工具列表才知道有 login 可调。
+            return next.run(request).await;
+        }
         return unauthorized("未携带登录凭证", None);
     };
 
-    let subject = match authenticate(&state, &config, &cookie).await {
+    let subject = match authenticate(&state, &config, &credential).await {
         Ok(subject) => subject,
-        Err(response) => return response,
+        Err(response) => {
+            // 凭证无效（401）在 /mcp + 闸门开时同样交给闸门接管：MCP 客户端的
+            // token 过期后，它需要的是「重新建立身份」的指引卡，不是一条它
+            // 没法处理的 HTTP 401。
+            //
+            // **只让 401 走这条路**：503（插件不可达）/500（契约破损）是基础设施
+            // 故障，原样穿透——降级放行会把 auth 插件抖动伪装成「没人登录」。
+            if mcp_gate_active && response.status() == StatusCode::UNAUTHORIZED {
+                return next.run(request).await;
+            }
+            return response;
+        }
     };
 
     if !subject.scopes.iter().any(|s| s == needed) {
@@ -223,15 +250,52 @@ pub async fn authorize(
     next.run(request).await
 }
 
-/// 取请求里的 Cookie。
-fn cookie_of(request: &Request) -> Option<String> {
+// ---------------------------------------------------------------- 凭证提取
+
+/// 请求携带的登录凭证。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Credential {
+    /// 浏览器 Cookie 原文（4A 会话形态，存量通道）
+    Cookie(String),
+    /// `Authorization: Bearer <token>` 的 token（平台登录态，嵌入场景新通道）
+    Bearer(String),
+}
+
+impl Credential {
+    /// WWW-Authenticate 里该指引的认证入口。
+    fn scheme(&self) -> &'static str {
+        match self {
+            Credential::Cookie(_) => "Cookie",
+            Credential::Bearer(_) => "Bearer",
+        }
+    }
+}
+
+/// 取请求里的登录凭证。
+///
+/// **Bearer 优先于 Cookie**：显式带 token 的调用方（MCP 客户端 headers 配置、
+/// 服务端转发）意图明确，且是嵌入场景的新通道；Cookie 是存量通道，两者同现时
+/// 听新的。两者都取不到返回 `None`——交给调用方按路径决定 401 还是闸门接管。
+fn credential_of(request: &Request) -> Option<Credential> {
+    // RFC 7235：auth-scheme 大小写不敏感，所以 `Bearer`/`bearer` 都认
+    if let Some(value) = request.headers().get(header::AUTHORIZATION)
+        && let Ok(value) = value.to_str()
+        && let Some((scheme, token)) = value.trim().split_once(' ')
+        && scheme.eq_ignore_ascii_case("bearer")
+    {
+        let token = token.trim();
+        if !token.is_empty() {
+            return Some(Credential::Bearer(token.to_string()));
+        }
+    }
+
     request
         .headers()
         .get(header::COOKIE)
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
+        .map(|value| Credential::Cookie(value.to_string()))
 }
 
 // 类型定义搬到了 `hub-core`：MCP 工具面（`hub-mcp`）也要读它来填信封的 `subject`，
@@ -242,14 +306,22 @@ pub use hub_core::AuthenticatedSubject;
 /// 问 auth 插件「这个凭证是谁、有哪几个权限位」。
 ///
 /// 返回值里的 `Err` 已经是一个可以直接回给调用方的响应。
+///
+/// 载荷用**新契约** `{kind, credential}`：中间件按头形态已经分好了 cookie/token，
+/// 插件照 kind 走对应链路（cookie → 4A+平台双链路，token → 平台直验）——
+/// 不让插件猜凭证类型，猜错的白跑一趟都算贵的。
 // Err 直接携带 axum Response（其 Body 本身就胖）是本 crate 的统一形态；
 // 该函数在管理面每请求至多一次，不是热路径——对 result_large_err 显式豁免。
 #[allow(clippy::result_large_err)]
 async fn authenticate(
     state: &ApiState,
     config: &AuthzConfig,
-    cookie: &str,
+    credential: &Credential,
 ) -> Result<AuthenticatedSubject, Response> {
+    let (kind, credential_value) = match credential {
+        Credential::Cookie(cookie) => ("cookie", cookie),
+        Credential::Bearer(token) => ("token", token),
+    };
     let mut envelope = Envelope {
         r#type: PayloadType::Request as i32,
         subject: Some(Subject {
@@ -259,7 +331,10 @@ async fn authenticate(
         }),
         ..Default::default()
     };
-    let payload = match hub_proto::encode_payload(&serde_json::json!({ "cookie": cookie })) {
+    let payload = match hub_proto::encode_payload(&serde_json::json!({
+        "kind": kind,
+        "credential": credential_value,
+    })) {
         Ok(payload) => payload,
         Err(err) => {
             // 编码失败只可能是中台自己的 bug（载荷是个普通对象）
@@ -295,7 +370,7 @@ async fn authenticate(
                     .get("reason")
                     .and_then(|v| v.as_str())
                     .unwrap_or("凭证无效");
-                return Err(unauthorized(reason, None));
+                return Err(unauthorized(reason, Some(credential.scheme())));
             }
 
             let user_code = payload
@@ -324,6 +399,12 @@ async fn authenticate(
                     .unwrap_or(&user_code)
                     .to_string(),
                 scopes,
+                // 只有 Bearer 形态才随身份携带 token：Cookie 是 4A 会话，
+                // 对下游要平台登录态的插件没有用处
+                bearer_token: match credential {
+                    Credential::Bearer(token) => Some(token.clone()),
+                    Credential::Cookie(_) => None,
+                },
             })
         }
 
@@ -337,7 +418,7 @@ async fn authenticate(
                     .collect::<Vec<_>>()
                     .join("；")
             ),
-            None,
+            Some(credential.scheme()),
         )),
 
         // **插件不可达是基础设施故障，不能降级成匿名放行**。

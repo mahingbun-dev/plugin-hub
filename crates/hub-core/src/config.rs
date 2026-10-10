@@ -206,6 +206,16 @@ pub struct Config {
     /// 写错要在启动时拦下（[`Self::validate`]）——策略拼错若被静默当成默认值，
     /// 收紧治理的部署会毫不知情地敞着口子。
     pub plugin_call_policy: String,
+
+    /// **CORS 白名单**（env `HUB_CORS_ALLOWED_ORIGINS`，逗号分隔的 Origin 列表）。
+    ///
+    /// 嵌入场景的传输层开关：嵌入方前端与 hub 不同 origin（同站不同端口/子域）时，
+    /// 浏览器要求服务端应答 CORS 头（`Access-Control-Allow-Origin` 精确回显 +
+    /// `Allow-Credentials: true`），带 Cookie 的跨域 fetch 才会被放行。
+    ///
+    /// **未配 = 不挂 CORS 层**（同域反代部署的既有形态，零行为变化）。
+    /// 刻意不做 `*`：允许凭证的 CORS 规范禁止通配 Origin，而嵌入要带的正是 Cookie。
+    pub cors_allowed_origins: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,6 +329,7 @@ impl Config {
             mcp_public_endpoint: optional(&get, "HUB_MCP_PUBLIC_ENDPOINT"),
             plugin_call_policy: optional(&get, "HUB_PLUGIN_CALL_POLICY")
                 .unwrap_or_else(|| DEFAULT_PLUGIN_CALL_POLICY.to_string()),
+            cors_allowed_origins: split_list(&get, "HUB_CORS_ALLOWED_ORIGINS"),
         };
 
         cfg.validate()?;
@@ -505,6 +516,29 @@ mod tests {
         assert_eq!(cfg.bootstrap_token, None);
         // 默认不配 MCP 白名单：只认本机 Host，够本机开发用，且不会误放开
         assert_eq!(cfg.mcp_allowed_hosts, None);
+        // 默认不配 CORS 白名单：不挂 CORS 层，同域反代部署零行为变化
+        assert_eq!(cfg.cors_allowed_origins, None);
+    }
+
+    #[test]
+    fn cors白名单可由环境变量覆盖() {
+        let mut pairs = minimal();
+        pairs.extend([
+            (
+                "HUB_CORS_ALLOWED_ORIGINS",
+                "https://console.example.com, https://app.example.com:8443",
+            ),
+            // 空/纯逗号 = None（split_list 语义，与 MCP 白名单一致）
+            ("HUB_CORS_EMPTY", ""),
+        ]);
+        let cfg = Config::from_source(source(&pairs)).unwrap();
+        assert_eq!(
+            cfg.cors_allowed_origins,
+            Some(vec![
+                "https://console.example.com".to_string(),
+                "https://app.example.com:8443".to_string()
+            ])
+        );
     }
 
     #[test]

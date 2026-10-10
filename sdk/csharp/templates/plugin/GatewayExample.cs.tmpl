@@ -1,0 +1,138 @@
+using Hub.V1;
+using @@sdk_module@@;
+
+namespace @@package@@;
+
+/// <summary>
+/// @@name@@ 的插件互调与发现演示（M6）——<b>休眠代码</b>，不接线到插件主流程。
+///
+/// <c>Program.cs</c> 不调用它：它的作用是「编译期演示」，<c>dotnet build</c>
+/// 会把它编到，SDK 升级改了签名时这里会先红，而不是等插件作者抄过去才发现编不过。
+///
+/// <b>怎么拿到 <see cref="GatewayClient"/></b>：不要自己 <c>new</c>（构造它要 gRPC
+/// 通道与凭证，凭证只有宿主 <c>PluginHost</c> 拿得到）。实现
+/// <see cref="IGatewayAware"/> 的 <see cref="IGatewayAware.SetGateway"/>，宿主会在
+/// <b>每次注册成功后</b>注入（与 <see cref="IStateAware.SetState"/> 同款约定）：
+/// <code>
+/// public sealed class Plugin : IPlugin, IStateAware, IGatewayAware
+/// {
+///     private volatile StateClient? _state;
+///     private volatile GatewayClient? _gateway;
+///
+///     public void SetState(StateClient state) => _state = state;
+///     public void SetGateway(GatewayClient gateway) => _gateway = gateway;
+///
+///     public async Task&lt;Envelope&gt; HandleAsync(Envelope env, CancellationToken ct)
+///     {
+///         if (_gateway is { } gateway)
+///         {
+///             await GatewayExample.DemoInvokeAndPublishAsync(gateway, _state, env, ct);
+///         }
+///         // ……
+///     }
+/// }
+/// </code>
+/// </summary>
+public static class GatewayExample
+{
+    /// <summary>
+    /// 发现三件套：现在能调谁、谁在产/消某条消息、目标插件吃什么吐什么。
+    ///
+    /// 都只从中台取，别旁路维护一份硬编码名单——那份名单会在别人改契约的
+    /// 第一个小时里过时。
+    /// </summary>
+    public static async Task DemoDiscoveryAsync(GatewayClient gateway, CancellationToken cancellationToken = default)
+    {
+        // ① 在线插件清单（includeOffline=false 只列有健康实例的）。
+        // 排查「我声明的上游为什么调不到」时传 true，把离线的也带出来看。
+        var plugins = await gateway.ListPluginsAsync(cancellationToken: cancellationToken);
+        foreach (var p in plugins)
+        {
+            // 演示只打印；真实用法是从清单里找目标插件/版本
+            Console.WriteLine($"插件 {p.Name}@{p.LatestVersion}（{(p.Online ? "在线" : "离线")}）");
+        }
+
+        // ② 消息类型 → 生产者 / 消费者。google.protobuf.Struct
+        // 就是「直接调用的 JSON 载荷」，看谁接受它就知道谁能被 agent 直接调。
+        var endpoints = await gateway.DescribeMessageAsync("google.protobuf.Struct", cancellationToken);
+        Console.WriteLine($"Struct 的生产者 {endpoints.Producers.Count} 个、消费者 {endpoints.Consumers.Count} 个");
+
+        // ③ 目标插件的契约：调别人之前先看它吃什么、吐什么。
+        // version 传 null 取最新已注册版本；多版本共存时锁版本是更稳的选择。
+        var contract = await gateway.GetContractAsync("目标插件名", cancellationToken: cancellationToken);
+        Console.WriteLine($"目标契约 {contract.Name}@{contract.Version}，可调用名单 {contract.Invokes.Count} 条");
+    }
+
+    /// <summary>
+    /// 同步互调 + 异步发布的演示。三个参数都是插件 <c>HandleAsync</c> 里现成的东西：
+    /// 客户端来自 <c>SetGateway</c> 注入、state 来自 <c>SetState</c>、信封就是本次处理的入参。
+    /// </summary>
+    public static async Task DemoInvokeAndPublishAsync(
+        GatewayClient gateway,
+        StateClient? state,
+        Envelope env,
+        CancellationToken cancellationToken = default)
+    {
+        // ---- 同步互调：要下游的处理结果、愿意同步等 ----
+        //
+        // CurrentEnvelope 传**当前正在处理的信封**：trace 从上游贯通到下游，互调链
+        // （meta 的 hub.call_chain）原样带下去让防环生效。链是**原样复制**的——
+        // 不要自己往链上追加自己，中台在整备时会把本次 caller（按凭证反查的那个）
+        // 追加进去，SDK 抢着做会让防环与审计的判断对象出错。
+        try
+        {
+            var outEnv = await gateway.InvokePluginAsync(
+                "目标插件名",
+                new InvokeOptions
+                {
+                    PayloadJson = new Dictionary<string, object?> { ["text"] = "来自 @@name@@ 的互调" },
+                    CurrentEnvelope = env,
+                    Timeout = TimeSpan.FromSeconds(30), // Zero = 不填，由中台给默认预算兜底
+                    // Version = "1.2.0", // 锁版本的互调（缺省调最新已注册版本）
+                },
+                cancellationToken);
+
+            // HANDLED 时拿到下游的信封，载荷从这里取（本演示只打印一条）
+            Console.WriteLine("互调成功，下游已处理");
+            _ = Envelopes.PayloadJson(outEnv);
+        }
+        catch (InvokeRejectedException ex)
+        {
+            // REJECTED 是下游校验器的**意见**：Issues 能定位到具体字段，改数据重试有意义
+            Console.WriteLine($"被目标插件拒绝：{ex.Reason}（{ex.Issues.Count} 条问题）");
+            return;
+        }
+        catch (InvokeFailedException ex)
+        {
+            // ERROR 是中台/下游的**裁决**（未声明 invokes、超配额、成环、链深超限、
+            // 下游出错……）：重试同一条请求大概率还是它
+            Console.WriteLine($"互调未被执行：{ex.Reason}");
+            return;
+        }
+        // RpcException（网络、未鉴权……）不在这里接：原样上抛给调用方按远端故障处理；
+        // 凭证被拒时宿主已在后台重注册换新凭证
+
+        // ---- 异步发布：投给 flow 就返回，拿不到处理结果 ----
+        if (state is not null)
+        {
+            // publish 的信封用 NewEnvelope()「新起步」：MessageId 是总线的幂等键
+            // （at-least-once 投递靠它去重），复用当前信封的 id 会让下游把「新发布的
+            // 一条」当成「已处理过的那条」去重掉。
+            var @event = Envelopes.WithPayloadJson(Envelopes.NewEnvelope(), new Dictionary<string, object?>
+            {
+                ["text"] = "@@name@@ 触发的事件",
+            });
+            try
+            {
+                // 受理了：返回值是这次 flow 执行的标识（run_id），拿它去链路里查「后来怎么样了」
+                var runId = await state.PublishAsync("目标flow名", @event, cancellationToken);
+                Console.WriteLine($"已触发下游 flow（run_id={runId}）");
+            }
+            catch (PublishRejectedException ex)
+            {
+                // 被防环/链深/配额拦下是业务裁决，重试同一条多半还是被拒
+                Console.WriteLine($"发布被拒：{ex.Reason}");
+            }
+        }
+    }
+}

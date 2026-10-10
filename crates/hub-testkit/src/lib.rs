@@ -239,16 +239,20 @@ impl PluginRuntime for TestPlugin {
             )));
         }
 
-        // auth 插件模式：按 cookie 回答「这个凭证是谁、有哪几个权限位」。
-        // 真实插件是去问 SSO，这里按配置直接答——被测的是中台那一侧怎么用它
+        // auth 插件模式：按凭证回答「这个凭证是谁、有哪几个权限位」。
+        // 真实插件是去问 SSO/平台，这里按配置直接答——被测的是中台那一侧怎么用它。
+        // 凭证字段认**两种契约**：新契约的 `credential`（中间件发的是
+        // `{kind, credential}`）与旧契约的 `cookie`（直调插件的存量形状）——
+        // 匹配规则一致（子串），替身不区分 kind：真假凭证的分辨是被测中台的职责
         if let Some(rules) = self.behavior.auth_scopes.clone() {
-            let cookie = envelope
+            let credential = envelope
                 .payload
                 .as_ref()
                 .and_then(hub_proto::decode_payload)
                 .and_then(|payload| {
                     payload
-                        .get("cookie")
+                        .get("credential")
+                        .or_else(|| payload.get("cookie"))
                         .and_then(|v| v.as_str())
                         .map(str::to_string)
                 })
@@ -256,7 +260,7 @@ impl PluginRuntime for TestPlugin {
 
             let body = match rules
                 .iter()
-                .find(|(needle, _)| cookie.contains(needle.as_str()))
+                .find(|(needle, _)| credential.contains(needle.as_str()))
             {
                 Some((_, scopes)) => serde_json::json!({
                     "authenticated": true,

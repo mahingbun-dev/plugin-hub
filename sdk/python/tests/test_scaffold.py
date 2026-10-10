@@ -22,6 +22,7 @@ EXPECTED_FILES = {
     "AGENTS.md",
     "Dockerfile",
     "README.md",
+    "gateway_example.py",
     "main.py",
     "plugin.py",
     "requirements.txt",

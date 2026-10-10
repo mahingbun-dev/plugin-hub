@@ -1,0 +1,101 @@
+"""插件互调与发现（M6）的休眠演示：能编译、不接线——``plugin.py`` 一行都不用它。
+
+真要用互调时，把这里的调用抄进业务代码即可。三件事各一个函数，按依赖顺序读：
+发现（:func:`gateway_example_discover`）→ 同步互调（:func:`gateway_example_invoke`）
+→ 异步发布（:func:`gateway_example_publish`）。
+
+为什么单独放一个文件而不是并进 ``plugin.py``：互调不是每个插件的主业，混进插件体
+会把「接入必读的最小代码」撑大一截；而示例的价值在「照着抄」，放哪都一样。
+
+拿到 gateway 的路：覆写 ``Plugin.set_gateway``，骨架在**每次注册成功后**注入
+（与 ``set_state`` 同一个时机；从注册循环线程调、``handle`` 跑在 gRPC 工作线程上，
+存取要过锁——照抄 ``plugin.py`` 里 ``_state`` 那套写法即可）。
+
+完整文档见中台仓库 ``docs/plugin-onboarding.md``；可跑起来的两插件互调示例见
+中台仓库 ``examples/ping-chain``。
+"""
+
+from __future__ import annotations
+
+from @@sdk_module@@ import (
+    STRUCT_FQ_NAME,
+    GatewayClient,
+    InvokeFailed,
+    InvokeRejected,
+    StateClient,
+    new_ulid,
+    payload_json,
+    with_payload_json,
+)
+from @@sdk_module@@.proto.hubv1 import envelope_pb2
+
+
+def gateway_example_discover(gateway: GatewayClient) -> None:
+    """演示发现：谁在线（``list_plugins``）、某个消息类型由谁生产/消费（``describe_message``）。
+
+    用它回答「该调谁」，不要旁路维护硬编码的下游名单——那份名单一定会跟注册表漂移。
+    """
+    # 缺省只列在线（有健康实例）的插件；include_offline=True 会附上离线插件
+    for summary in gateway.list_plugins():
+        print(f"在线: {summary.name}（最新版本 {summary.latest_version}，"
+              f"{summary.instance_count} 个健康实例）")
+
+    # 消息类型 → 生产者/消费者。fq_name 与 manifest 契约同口径；
+    # 两边都查无时返回空响应而不是报错——「没人生产/消费它」本身就是有效答案
+    known = gateway.describe_message(STRUCT_FQ_NAME)
+    for endpoint in known.producers:
+        print(f"google.protobuf.Struct 的生产者: {endpoint.plugin} {endpoint.version}")
+
+
+def gateway_example_invoke(gateway: GatewayClient, env: envelope_pb2.Envelope) -> envelope_pb2.Envelope:
+    """演示同步互调：经中台调用另一个插件，拿回它处理后的信封。
+
+    插件之间**不直连**——直连会绕过中台的鉴权、审计、熔断与限额，所以一律
+    A→中台→B。
+
+    ``current_envelope`` 传「我正在处理的信封」是这段里最关键的一行：SDK 复制它的
+    ``trace_id``/``run_id``/``node_id`` 让整条链落进同一个 trace，并把防环链
+    （``meta["hub.call_chain"]``）**原样**带上——不要自己往链里追加自己，追加
+    caller 是中台代调时做的，客户端抢着做会把链写错（链的语义是「已处理过该消息的
+    插件」）。不传它则是一次顶层发起的全新调用：新 trace、不带链。
+    """
+    try:
+        downstream = gateway.invoke_plugin(
+            "目标插件名",
+            {"text": "hello"},
+            current_envelope=env,   # trace 贯通与防环链都靠它
+            timeout_ms=30_000,      # 本次调用的业务预算（毫秒），0 = SDK 兜底值
+        )
+    except InvokeRejected as err:
+        # 目标插件的校验器拒绝：err.issues 的 path 能定位到具体字段，改数据后可以重试。
+        # REJECTED / ERROR 是业务结果而不是 gRPC 错误——SDK 把它们翻成类型化异常，
+        # 调用方按类型分支，而不是去解析异常字符串
+        raise RuntimeError(f"被目标插件拒绝: {err.reason}（{len(err.issues)} 个问题）") from err
+    except InvokeFailed as err:
+        # 中台拦下（未声明授权、超配额、成环、链深超限）或下游出错：
+        # 按 err.reason 区分「改逻辑」与「退避重试」——盲目重试没有意义
+        raise RuntimeError(f"互调失败: {err.reason}") from err
+    # 走到这里的只剩基础设施故障（grpc.RpcError，原样上抛）或正常返回
+
+    reply, _ = payload_json(downstream)
+    print(f"下游回了: {reply}")
+    return downstream
+
+
+def gateway_example_publish(state: StateClient, target: str) -> str:
+    """演示异步发布：把一条信封投递给目标 flow，触发下游编排。
+
+    中台受理即返回，拿不到业务结果——要结果就走上面的 ``invoke_plugin``。
+    ``publish`` 挂在 StateClient 名下而不是 GatewayClient：它是「写总线」而不是
+    「调插件」，与状态共用同一张凭证。信封自己构造（message_id 用 ``new_ulid``），
+    载荷用 ``with_payload_json`` 装。
+    """
+    envelope = envelope_pb2.Envelope(message_id=new_ulid())
+    envelope = with_payload_json(envelope, {"text": "hello"})
+
+    receipt = state.publish(target, envelope)
+    if not receipt.accepted:
+        # 未受理是业务结果（防环、超限、目标 flow 不存在），reason 说明原因——
+        # 该改目标或改逻辑，退避重试没有意义
+        raise RuntimeError(f"中台未受理 publish: {receipt.reason}")
+    return receipt.run_id

@@ -31,6 +31,12 @@ use tower::ServiceExt as _;
 /// 返回 registry 一并交出来，需要注册插件的用例才能用——「鉴权闸门在不在」
 /// 那类用例不需要插件（中间件在没带凭证时直接 401，不会去问插件）。
 fn build(pool: PgPool) -> (Router, Registry) {
+    build_with_gate(pool, false)
+}
+
+/// 闸门形态可配的组装：`true` 时 /mcp 的无凭证请求会放行到工具面
+/// （由 MCP 登录闸门接管），`false` 时维持既有行为（无凭证 401）。
+fn build_with_gate(pool: PgPool, gate: bool) -> (Router, Registry) {
     let store = Store::from_pool(pool);
     let client = Arc::new(PluginClient::new(PluginClientConfig::default()));
     let registry = Registry::new(
@@ -44,11 +50,16 @@ fn build(pool: PgPool) -> (Router, Registry) {
         FlowExecutor::new(registry.clone(), invoker.clone()),
     );
 
-    let mcp =
-        HubMcp::new(store.clone(), invoker.clone(), flows.clone()).router(CancellationToken::new());
+    // 闸门开关必须**两处同源**：HTTP 层（AuthzConfig，决定无凭证放不放行）
+    // 与工具面（HubMcp，决定放行之后谁来接管）。只开一边的断法是：
+    // HTTP 放行了、工具面却匿名直调——恰好是这两条用例要抓的断点。
+    let mcp = HubMcp::new(store.clone(), invoker.clone(), flows.clone())
+        .with_login_gate(gate)
+        .router(CancellationToken::new());
     let api = ApiState::new(store, registry.clone(), invoker, flows).with_authz(AuthzConfig {
         plugin: "auth".to_string(),
         version: None,
+        mcp_login_gate: gate,
     });
 
     (http_app(SystemState::without_metrics(), api, mcp), registry)
@@ -136,6 +147,17 @@ async fn mcp_call(
     cookie: Option<&str>,
     body: serde_json::Value,
 ) -> (Option<String>, serde_json::Value) {
+    mcp_call_with_bearer(app, session, cookie, None, body).await
+}
+
+/// 带 `Authorization: Bearer` 的 MCP 调用（嵌入场景：客户端 headers 配 token）。
+async fn mcp_call_with_bearer(
+    app: &Router,
+    session: Option<&str>,
+    cookie: Option<&str>,
+    bearer: Option<&str>,
+    body: serde_json::Value,
+) -> (Option<String>, serde_json::Value) {
     let mut builder = Request::builder()
         .method("POST")
         .uri("/mcp")
@@ -147,6 +169,9 @@ async fn mcp_call(
     }
     if let Some(cookie) = cookie {
         builder = builder.header("cookie", cookie);
+    }
+    if let Some(bearer) = bearer {
+        builder = builder.header("authorization", format!("Bearer {bearer}"));
     }
 
     let request = builder
@@ -270,5 +295,162 @@ async fn 身份从凭证一路传到插件(pool: PgPool) {
         subject.scopes.iter().any(|s| s == "hub:invoke"),
         "权限位要一并带上，实际 {:?}",
         subject.scopes
+    );
+}
+
+/// **Bearer 直传的端到端**：token → 鉴权插件 → 中间件 → MCP 工具 → 插件信封。
+///
+/// 与上面那条 Cookie 链路对称，验的是嵌入场景的新通道。两个断言都是「插件
+/// 收到了什么」：subject 来自 Bearer 验出的身份；meta 里的 `hub.mas_token`
+/// 是**这次请求的 token**——即便 login 缓存里有另一个身份的 token 也不能顶替
+/// （进程级单槽缓存，请求凭证才是「这次调用是谁」的答案）。
+#[sqlx::test(migrations = "../hub-store/migrations")]
+async fn bearer直传的身份与登录态一路传到插件(pool: PgPool) {
+    let (app, registry) = build_with_gate(pool, true);
+
+    // 鉴权插件认得这个 token（匹配规则与 cookie 一致：子串）
+    let auth = kit::start(kit::Behavior {
+        auth_scopes: Some(vec![(
+            "tk-admin".to_string(),
+            vec!["hub:invoke".to_string()],
+        )]),
+        ..kit::Behavior::named("auth", "1.0.0")
+    })
+    .await;
+    assert!(
+        registry
+            .register(&auth.register_request(), None)
+            .await
+            .accepted,
+        "鉴权插件应能注册"
+    );
+
+    let echo = kit::start_default().await;
+    assert!(
+        registry
+            .register(&echo.register_request(), None)
+            .await
+            .accepted,
+        "回显插件应能注册"
+    );
+
+    // Bearer 握手 MCP 会话（无 Cookie）。**闸门开着**：请求凭证优先路径——
+    // 中间件验过 Bearer、身份进请求扩展，login_gate_subject 应直接用它，
+    // 不弹窗、不落拒卡（「请求凭证 > login 缓存」的顺序另有单测钉着，
+    // 端到端这里验的是整条通道可达）。
+    let (session, value) = mcp_call_with_bearer(
+        &app,
+        None,
+        None,
+        Some("tk-admin"),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "embed-client", "version": "0.1.0" }
+            }
+        }),
+    )
+    .await;
+    let session = session.unwrap_or_else(|| panic!("Bearer 应能建立会话，实际：{value}"));
+
+    let (_, value) = mcp_call_with_bearer(
+        &app,
+        Some(&session),
+        None,
+        Some("tk-admin"),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "invoke_plugin",
+                "arguments": { "plugin": "echo-plugin", "payload": { "a": 1 } }
+            }
+        }),
+    )
+    .await;
+
+    let seen = echo.last_envelope().expect("插件应收到信封");
+    let subject = seen
+        .subject
+        .unwrap_or_else(|| panic!("信封里应带上身份，MCP 响应：{value}"));
+
+    assert_eq!(subject.id, "u-1", "身份应来自 Bearer 验出的 userCode");
+    let token = seen
+        .meta
+        .get("hub.mas_token")
+        .unwrap_or_else(|| panic!("信封 meta 应透传请求的登录态，实际 {:?}", seen.meta));
+    assert_eq!(
+        token, "tk-admin",
+        "meta 里必须是**这次请求**的 token，不是 login 缓存里别人的"
+    );
+}
+
+/// **无凭证的 MCP 请求在闸门开启时不再死锁在 HTTP 401**。
+///
+/// 改造前：/mcp 无 Cookie → 中间件 401 → 客户端连 initialize 都发不出去，
+/// login 工具永远调不到——闸门形同虚设。改造后：无凭证放行到工具面，
+/// 插件调用被闸门拦下并给出**指引卡**（next_action 指向 login），
+/// agent 照着做就能建立身份。闸门关闭时行为不变（另一条用例钉着 401）。
+#[sqlx::test(migrations = "../hub-store/migrations")]
+async fn 闸门开启时无凭证的mcp请求拿到指引卡而不是401(pool: PgPool) {
+    let (app, registry) = build_with_gate(pool, true);
+
+    // 不注册任何插件也要成立：指引卡在调插件之前就给出
+    let _unused = registry;
+
+    let (session, value) = mcp_call(
+        &app,
+        None,
+        None,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "gateless-client", "version": "0.1.0" }
+            }
+        }),
+    )
+    .await;
+    let session =
+        session.unwrap_or_else(|| panic!("闸门开启时无凭证也应能建立会话，实际：{value}"));
+
+    let (_, value) = mcp_call(
+        &app,
+        Some(&session),
+        None,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "invoke_plugin",
+                "arguments": { "plugin": "anything", "payload": {} }
+            }
+        }),
+    )
+    .await;
+
+    // 拒卡经 json_result 渲染成 content[0].text 的 JSON 字符串
+    let card: serde_json::Value = serde_json::from_str(
+        value["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default(),
+    )
+    .unwrap_or(serde_json::Value::Null);
+    assert_eq!(
+        card["login"]["required"], true,
+        "插件调用应被闸门拦下并给指引卡，实际：{card}"
+    );
+    assert_eq!(
+        card["next_action"]["tool"], "login",
+        "指引卡要告诉 agent 下一步调什么，实际：{card}"
     );
 }

@@ -11,6 +11,7 @@ use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
 use crate::Language;
+use crate::TemplatesError;
 use crate::render::{RenderError, Values, render};
 
 /// 打包失败。
@@ -24,6 +25,9 @@ pub enum PackError {
 
     /// 写内存失败（理论上不会发生，但不写 unwrap）。
     Io(std::io::Error),
+
+    /// 这门语言的升级素材还没就位（五门并行产出期的过渡态）。
+    Upgrade(TemplatesError),
 }
 
 impl std::fmt::Display for PackError {
@@ -32,6 +36,7 @@ impl std::fmt::Display for PackError {
             Self::Render { file, source } => write!(f, "渲染 {file} 失败：{source}"),
             Self::Zip(e) => write!(f, "打包失败：{e}"),
             Self::Io(e) => write!(f, "打包失败：{e}"),
+            Self::Upgrade(e) => write!(f, "打不出升级包：{e}"),
         }
     }
 }
@@ -47,6 +52,12 @@ impl From<zip::result::ZipError> for PackError {
 impl From<std::io::Error> for PackError {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)
+    }
+}
+
+impl From<TemplatesError> for PackError {
+    fn from(e: TemplatesError) -> Self {
+        Self::Upgrade(e)
     }
 }
 
@@ -108,6 +119,71 @@ pub fn build_zip(lang: &Language, values: &Values) -> Result<Vec<u8>, PackError>
 /// 与实际下载量对不上的数字，比不显示更糟。
 pub fn archive_size(lang: &Language, values: &Values) -> Result<usize, PackError> {
     Ok(build_zip(lang, values)?.len())
+}
+
+/// M6 升级包的下载文件名。与新工程包（[`download_filename`]）区分开一个
+/// `upgrade` 段——两者都发到开发者手里，文件名是唯一的区分面。
+pub fn upgrade_download_filename(lang: &Language, plugin_name: &str) -> String {
+    format!("plugin-hub-{}-upgrade-{plugin_name}.zip", lang.id)
+}
+
+/// 渲染并打包一门语言的 M6 升级补丁包（发给**存量**插件工程）。
+///
+/// 与 [`build_zip`] 同一条路：素材逐文件渲染（`@@key@@` 占位符）、Stored 压缩、
+/// 顶层一层以插件名命名的目录——CLI 与 HTTP 两条下发通道因此产出同源的包。
+/// 与新工程包的差别只有两处：
+///
+/// - 素材来自 `templates/upgrade/`（[`crate::upgrade_files`]），不是新工程的模板清单；
+/// - `.sh` 素材带 0755 可执行位：`hub-scaffold upgrade` 落盘时照它设权限，`unzip`
+///   也认它。没有这一位，开发者拿到手的第一件事是发现 `bash upgrade.sh` 跑不了，
+///   而「先 chmod」那条提示只写在 UPGRADE.md 里，没人会先读它。
+pub fn build_upgrade_zip(lang: &Language, values: &Values) -> Result<Vec<u8>, PackError> {
+    let files = crate::upgrade_files(lang.id)?;
+
+    // `@@sdk_path@@` 由这里按语言注入，理由与 build_zip 相同：包内 SDK 的目录名是
+    // 语言的属性，调用方没有理由知道它，也没有理由能把它传错。
+    let mut values = values.clone();
+    if !lang.sdk_dir.is_empty() {
+        values.sdk_path = format!("./{}", lang.sdk_dir);
+    }
+    let values = &values;
+
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    // store 模式：理由同 build_zip——纯文本小文件，压缩收益抵不上引入 deflate
+    let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    let stored_exec = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o755);
+
+    for (output, raw) in files {
+        let raw = std::str::from_utf8(raw).map_err(|e| {
+            PackError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("升级素材 {output} 不是 UTF-8：{e}"),
+            ))
+        })?;
+
+        let rendered = render(raw, values).map_err(|source| PackError::Render {
+            file: (*output).to_string(),
+            source,
+        })?;
+
+        let entry_options = if output.ends_with(".sh") {
+            stored_exec
+        } else {
+            stored
+        };
+        writer.start_file(format!("{}/{output}", values.name), entry_options)?;
+        writer.write_all(rendered.as_bytes())?;
+    }
+
+    Ok(writer.finish()?.into_inner())
+}
+
+/// 升级包打出来会是多少字节。控制台的卡片要显示它——与 [`archive_size`] 同一条
+/// 理由：量真实下载量，而不是把素材长度加起来。
+pub fn upgrade_archive_size(lang: &Language, values: &Values) -> Result<usize, PackError> {
+    Ok(build_upgrade_zip(lang, values)?.len())
 }
 
 #[cfg(test)]
@@ -277,8 +353,172 @@ mod tests {
     }
 
     #[test]
+    fn 升级包下载文件名带语言与插件名() {
+        assert_eq!(
+            upgrade_download_filename(go(), "order-reader"),
+            "plugin-hub-go-upgrade-order-reader.zip"
+        );
+    }
+
+    #[test]
     fn 包大小与包本身一致() {
         let bytes = build_zip(go(), &values()).unwrap();
         assert_eq!(archive_size(go(), &values()).unwrap(), bytes.len());
+    }
+
+    // ---------------------------------------------------------------- 升级包
+
+    /// 素材已就位的语言。并行产出期里不是五门都齐，测试逐条跳过缺的门。
+    fn langs_with_upgrade() -> Vec<&'static Language> {
+        languages()
+            .iter()
+            .copied()
+            .filter(|l| crate::upgrade_files(l.id).is_ok())
+            .collect()
+    }
+
+    #[test]
+    fn 升级包能解压且正好三件套() {
+        // 三件套契约（设计 §4.1）：upgrade.sh、UPGRADE.md、gateway_example 各一份。
+        // 多一份少一份都说明素材目录里混进了别的东西——那会随包发给存量工程的所有人。
+        for lang in langs_with_upgrade() {
+            let bytes = build_upgrade_zip(lang, &values()).unwrap();
+            let mut archive =
+                zip::ZipArchive::new(Cursor::new(bytes)).expect("产出的必须是合法 zip");
+
+            let names: Vec<String> = (0..archive.len())
+                .map(|i| archive.by_index(i).unwrap().name().to_string())
+                .collect();
+
+            assert_eq!(
+                names.len(),
+                3,
+                "{} 的升级包应有且只有三件套，实际条目：{names:?}",
+                lang.id
+            );
+
+            // 两份固定名的素材谁都不许少；第三个条目是各语言的 gateway_example
+            // （落点随语言的规范位置走，名字不跨门断言）
+            for must in ["upgrade.sh", "UPGRADE.md"] {
+                let want = format!("order-reader/{must}");
+                assert!(names.contains(&want), "{} 的升级包缺 {want}", lang.id);
+            }
+
+            // 顶层一层以插件名命名的目录：与 build_zip 同一条「解压不散文件」的约定
+            for name in &names {
+                assert!(
+                    name.starts_with("order-reader/"),
+                    "{name} 不在 order-reader/ 目录下——解压时会把文件散到当前目录"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn go与python的升级包含同名示例文件() {
+        // 「升级后项目与新生成项目形状一致」在文件名上的落点。这两门的示例文件
+        // 名由本仓库定死（工程根、gateway_example.<ext>），可以点名；其余门归
+        // 各语言负责人，落点在各自的规范位置。
+        for (lang_id, output) in [
+            ("go", "gateway_example.go"),
+            ("python", "gateway_example.py"),
+        ] {
+            let Ok(_) = crate::upgrade_files(lang_id) else {
+                // 素材存在才断言；缺了由磁盘比对那条给出更准的报错
+                continue;
+            };
+            let lang = languages()
+                .iter()
+                .copied()
+                .find(|l| l.id == lang_id)
+                .expect("语言必须存在");
+
+            let bytes = build_upgrade_zip(lang, &values()).unwrap();
+            let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+            assert!(
+                archive.by_name(&format!("order-reader/{output}")).is_ok(),
+                "{lang_id} 的升级包缺 {output}"
+            );
+        }
+    }
+
+    #[test]
+    fn 升级包渲染干净且sh带可执行位() {
+        for lang in langs_with_upgrade() {
+            let bytes = build_upgrade_zip(lang, &values()).unwrap();
+            let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+
+            for i in 0..archive.len() {
+                let mut entry = archive.by_index(i).unwrap();
+                let name = entry.name().to_string();
+                let mut text = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut text).unwrap();
+
+                // 升级包里没有「原样照抄」的 SDK——每个条目都是渲染产物，都必须干净
+                assert!(
+                    !text.contains(crate::render::PLACEHOLDER),
+                    "{name} 里残留了未渲染的占位符"
+                );
+
+                // UPGRADE.md 用 @@name@@ 指代项目：插件名必须真的被换进去了
+                // （上面那条管「没替换」，这条管「替换成空串」也逃不掉）
+                if name.ends_with("UPGRADE.md") {
+                    assert!(
+                        text.contains("order-reader"),
+                        "{name} 里没出现插件名——@@name@@ 八成被替换成了空值"
+                    );
+                }
+            }
+
+            // upgrade.sh 落盘后要能直接 bash：可执行位在打包时就得带上
+            // （hub-scaffold upgrade 与 unzip 都按它落权限）
+            let mode = archive
+                .by_name("order-reader/upgrade.sh")
+                .expect("三件套里必须有 upgrade.sh")
+                .unix_mode()
+                .expect("upgrade.sh 应带 unix 权限位");
+            assert_eq!(
+                mode & 0o111,
+                0o111,
+                "{} 的 upgrade.sh 缺可执行位，实际 {mode:#o}",
+                lang.id
+            );
+        }
+    }
+
+    #[test]
+    fn 升级包大小与包本身一致() {
+        for lang in langs_with_upgrade() {
+            let bytes = build_upgrade_zip(lang, &values()).unwrap();
+            assert_eq!(
+                upgrade_archive_size(lang, &values()).unwrap(),
+                bytes.len(),
+                "{} 的 upgrade_archive_size 与实际包不符",
+                lang.id
+            );
+        }
+    }
+
+    #[test]
+    fn 语言未知时打不出升级包() {
+        // 不在册的语言必须报错：静默出一个空 zip 的话，下载页给的就是一个死包
+        let bad = Language {
+            id: "test",
+            display_name: "Test",
+            description: "",
+            package_hint: "",
+            files: &[],
+            source_dir: "",
+            sdk_dir: "",
+            sdk_files: &[],
+            sdk_module: "example.com/sdk",
+        };
+        let err = build_upgrade_zip(&bad, &values()).unwrap_err();
+        match err {
+            PackError::Upgrade(TemplatesError::UnknownLang { lang_id, .. }) => {
+                assert_eq!(lang_id, "test");
+            }
+            other => panic!("应是未知语言错误，实际 {other:?}"),
+        }
     }
 }

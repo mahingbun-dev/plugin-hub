@@ -57,6 +57,13 @@ pub struct TemplateInfo {
     /// 与下载到的 zip 差着每个条目的头部与中央目录，会把一个能用的估算变成一个错的数字。
     pub size_bytes: usize,
 
+    /// M6 升级包下载下来大约多少字节；**0 = 这门语言的升级素材还没就绪**。
+    ///
+    /// 近似值的口径与 [`TemplateInfo::size_bytes`] 相同。素材在编译期嵌入
+    /// （`templates/upgrade/`），五门并行产出期允许部分语言缺席——前端拿 0
+    /// 判断「隐藏/禁用下载升级包按钮」，比一个 500 或空 zip 体面。
+    pub upgrade_size_bytes: u64,
+
     /// 中台自身的版本。模板随中台发版，这个值回答「这份模板适配哪版中台」。
     pub hub_version: &'static str,
 
@@ -90,6 +97,13 @@ pub async fn list(State(state): State<ApiState>) -> Json<Vec<TemplateInfo>> {
             // 包大小随插件名长度浮动，而列表是在用户填名字之前取的，所以页面上
             // 应当渲染成「约 32 KB」。详见 TemplateInfo::size_bytes 的说明。
             size_bytes: hub_templates::archive_size(lang, &sample_values(lang)).unwrap_or_default(),
+            // 素材未就绪的语言给 0（页面上据此藏掉「下载升级包」），而不是让
+            // 列表接口整体报错——五门并行产出期里，缺一门不该连另外几门也下载不了
+            upgrade_size_bytes: match hub_templates::upgrade_files(lang.id) {
+                Ok(_) => hub_templates::upgrade_archive_size(lang, &sample_values(lang))
+                    .unwrap_or_default() as u64,
+                Err(_) => 0,
+            },
             hub_version: env!("CARGO_PKG_VERSION"),
             built_at: hub_templates::built_at(),
             plugin_addr_configured: addr_configured,
@@ -106,6 +120,12 @@ pub struct DownloadQuery {
     pub name: String,
 
     /// 包名 / module 路径。留空时用插件名（与 `hub-plugin new` 的缺省一致）。
+    ///
+    /// **csharp 下载升级包时建议显式传**：csharp 素材里的 `@@package@@` 是 C#
+    /// 命名空间，而插件名常带 `-`（如 `order-reader`）——缺省代进去会渲染出
+    /// `namespace order-reader;` 这种非法代码，要到开发者 `dotnet build` 时才
+    /// 以一屏 CS0116 暴露，报错里没有一句指向「包名没传」。插件名本身是合法
+    /// 命名空间（如 `order_reader`）时缺省无碍。
     #[serde(default)]
     pub package: Option<String>,
 }
@@ -170,6 +190,11 @@ pub async fn download(
 /// `sdk_module` 取自语言本身（由 `hub-templates` 的 `build.rs` 给出），**不在这里
 /// 写死**：Go 的 module 路径与 Python 的包名是不同的东西，写死成某一门语言的值，
 /// 加语言时就要回来改这里。
+///
+/// `package` 的缺省（插件名）对 go / python / node / rust 的升级素材无碍——它们的
+/// 素材不用 `@@package@@`；**csharp 例外**，见 [`DownloadQuery::package`] 的说明：
+/// 素材里的 `@@package@@` 是 C# 命名空间，插件名带 `-` 时缺省渲染出非法代码，
+/// 前端在 csharp 门应引导用户显式填命名空间（如 `OrderReader`）。
 fn values_for(lang: &Language, name: &str, package: &str, hub_addr: Option<&str>) -> Values {
     let addr = hub_addr
         .map(str::trim)
@@ -177,6 +202,85 @@ fn values_for(lang: &Language, name: &str, package: &str, hub_addr: Option<&str>
         .unwrap_or(HUB_ADDR_PLACEHOLDER);
 
     Values::for_plugin(name, package, lang.sdk_module, addr)
+}
+
+/// 按语言下载 M6 升级补丁包（发给**存量**插件工程）。
+///
+/// 与 [`download`] 同一套判据（语言未知 404、插件名非法 400）与同一套 values 装配
+/// ——两条通道给同一个开发者，判据分叉就会出现「页面能下、CLI 报错」的割裂。
+///
+/// `?package=` 对 **csharp 建议总是显式传**（合法 C# 命名空间，如 `OrderReader`）：
+/// 缺省用插件名渲染 csharp 素材的 `@@package@@`（命名空间），插件名带 `-` 时产物
+/// 编不过，详见 [`DownloadQuery::package`]。CLI 那条通道（`hub-scaffold upgrade`）
+/// 会从存量工程的 csproj 自动探测，HTTP 这条探测不到——对面只是一个下载页。
+pub async fn upgrade_package(
+    State(state): State<ApiState>,
+    Path(lang_id): Path<String>,
+    Query(q): Query<DownloadQuery>,
+) -> Result<Response, ApiError> {
+    let name = q.name.trim();
+    let package = q
+        .package
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .unwrap_or(name);
+
+    let (bytes, filename) =
+        upgrade_package_bytes(&lang_id, name, package, state.plugin_public_addr.as_deref())?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// [`upgrade_package`] 的核心：校验、渲染、打包、给下载文件名。
+///
+/// 拆出来是因为 handler 要挂 State（构造一个真的 ApiState 得连数据库），而这条
+/// 逻辑值得直接测三态：成功 / 语言未知 404 / 名字非法 400——素材未就绪的 404
+/// 也在这一层分流。
+fn upgrade_package_bytes(
+    lang_id: &str,
+    name: &str,
+    package: &str,
+    hub_addr: Option<&str>,
+) -> Result<(Vec<u8>, String), ApiError> {
+    let lang = hub_templates::find(lang_id).ok_or_else(|| {
+        // 把有哪些语言列出来：写错一个字母时，这条消息就是唯一能自助的地方
+        let known: Vec<&str> = hub_templates::languages().iter().map(|l| l.id).collect();
+        ApiError::not_found(format!(
+            "没有 {lang_id} 这门语言的模板（现有：{}）",
+            known.join(" / ")
+        ))
+    })?;
+
+    // 与 download 同一条规则（中台注册期那条），理由见 download 里的注释
+    if !is_valid_plugin_name(name) {
+        return Err(ApiError::bad_request(
+            "插件名非法：只允许字母数字与 -_，最长 64 字符，且以字母数字开头",
+        ));
+    }
+
+    let values = values_for(lang, name, package, hub_addr);
+
+    let bytes = hub_templates::build_upgrade_zip(lang, &values).map_err(|e| match e {
+        // 素材未就绪是「这门还没有升级包」而不是中台故障：404 让前端提示
+        // 「请升级中台后再试」，错误信息点名缺的是哪几门
+        hub_templates::PackError::Upgrade(why) => ApiError::not_found(why.to_string()),
+        // 渲染失败的成因在中台这一侧（模板里有未定义的占位符），不是调用方的问题
+        other => ApiError::internal(format!("打包 {} 升级包失败：{other}", lang.display_name)),
+    })?;
+
+    let filename = hub_templates::upgrade_download_filename(lang, name);
+    Ok((bytes, filename))
 }
 
 /// 列表里量包大小用的样例取值。
@@ -250,6 +354,102 @@ mod tests {
             cli.contains(&want),
             "中台记的 sdk_module 与 CLI 的 SDKModule 对不上。CLI 里应有：{want}"
         );
+    }
+
+    // ---------------------------------------------------------------- 升级包
+
+    #[test]
+    fn 升级包_成功_产出zip与规定文件名() {
+        let (bytes, filename) =
+            upgrade_package_bytes("go", "order-reader", "order-reader", None).unwrap();
+
+        assert_eq!(filename, "plugin-hub-go-upgrade-order-reader.zip");
+        // hub-api 不依赖 zip crate（解包校验归 hub-templates 的测试），这里验
+        // 「确实是个 zip 且不是空的」：本地文件头魔数 PK\x03\x04 是 zip 的硬标志
+        assert!(
+            bytes.starts_with(b"PK\x03\x04"),
+            "升级包应以 zip 本地文件头开头"
+        );
+        assert!(!bytes.is_empty(), "升级包不可能是空的");
+
+        // UPGRADE.md 用 @@name@@ 指代项目：渲染取值必须真的进去了
+        // （zip 是 Stored 存储，正文按明文出现在包里，可以直接搜）
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            text.contains("UPGRADE.md"),
+            "包里应有三件套之一 UPGRADE.md 的正文"
+        );
+        assert!(
+            !text.contains("@@name@@"),
+            "包里残留了未渲染的 @@name@@——存量工程拿到的说明会指代不明"
+        );
+    }
+
+    #[test]
+    fn 升级包_未知语言_404并列出认得的() {
+        let err = upgrade_package_bytes("不存在", "order-reader", "order-reader", None)
+            .expect_err("未知语言应报错");
+        match &err {
+            ApiError::NotFound(message) => {
+                assert!(message.contains("不存在"), "应点名是哪门语言：{message}");
+                assert!(message.contains("go"), "应列出认得的语言：{message}");
+            }
+            other => panic!("应是 404，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 升级包_名字非法_400() {
+        // 判据与 download 共用中台注册期那条规则，这条锁住「升级包没有另搞一套」
+        for bad in ["", "-lead", "has space"] {
+            let err = upgrade_package_bytes("go", bad, bad, None).expect_err("非法名应报错");
+            assert!(
+                matches!(err, ApiError::BadRequest(_)),
+                "{bad:?} 应是 400，实际 {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn 升级包_素材未就绪_404而不是500() {
+        // **素材存在才断言**：五门素材并行产出，这条在还有门缺席时验「缺席的门
+        // 报 404」，五门齐之后整条空过——不锁任何一门「现在必须是缺席的」。
+        let missing = hub_templates::languages()
+            .iter()
+            .find(|l| hub_templates::upgrade_files(l.id).is_err());
+
+        if let Some(lang) = missing {
+            let err = upgrade_package_bytes(lang.id, "order-reader", "order-reader", None)
+                .expect_err("素材未就绪应报错");
+            match &err {
+                ApiError::NotFound(message) => {
+                    // 错误要点名缺的是哪门——这是排障时唯一能自助的地方
+                    assert!(
+                        message.contains(lang.id),
+                        "应点名 {lang}：{message}",
+                        lang = lang.id
+                    );
+                }
+                other => panic!("素材未就绪应是 404，实际 {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn 列表里的升级包大小_有素材的门量出来大于零() {
+        // list() 对有素材的门按 sample_values 量真实包大小、对没素材的门给 0。
+        // Err→0 那一行是三行装配，不值得为它起一个 ApiState（要连数据库）；
+        // 这里锁的是另一半：有素材时量出来的数字必须是个真包的大小（>0），
+        // 而不是 unwrap_or_default 把打包失败吞成了 0——那会让前端把「能下载」
+        // 的门也藏掉。
+        for lang in hub_templates::languages() {
+            if hub_templates::upgrade_files(lang.id).is_err() {
+                continue;
+            }
+            let size = hub_templates::upgrade_archive_size(lang, &sample_values(lang))
+                .unwrap_or_else(|e| panic!("{} 的升级包打不出来（列表会显示成 0）：{e}", lang.id));
+            assert!(size > 0, "{} 的升级包不该是空的", lang.id);
+        }
     }
 
     #[test]

@@ -454,6 +454,8 @@ docker exec plugin-hub hubctl delete-plugin <name> --yes    # irreversible, expl
 | [docs/vision.md](docs/vision.md) | The vision — "the hub that links everything": design philosophy and the ecosystem map (gates, A2A, hooks, shared context) |
 | [docs/design.md](docs/design.md) | Architecture trade-offs, contract design, data model, phased milestones, risks and explicit assumptions |
 | [docs/plugin-onboarding.md](docs/plugin-onboarding.md) | The full plugin onboarding flow: four gates, contract consistency, debugging and troubleshooting |
+| [docs/auth-embed-integration.md](docs/auth-embed-integration.md) | Embedding plugin-hub into an existing product: credential passthrough (Cookie / Bearer), CORS allowlist, identity precedence, login-gate fallback |
+| [docs/scaffold-upgrade-design.md](docs/scaffold-upgrade-design.md) | Design notes for the scaffold M6 upgrade: per-language inter-call examples and idempotent upgrade packages |
 | [deploy/.env.example](deploy/.env.example) | Every environment variable and why |
 | `sdk/<language>/README.md` | Each SDK's inventory and usage |
 

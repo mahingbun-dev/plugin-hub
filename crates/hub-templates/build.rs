@@ -57,7 +57,10 @@ const LANGUAGES: &[(&str, &str, &str, &str, &str)] = &[
 ///
 /// `_shared/` 放的是各语言共用的素材（如接入指南共通层），它在渲染时被内联进
 /// `AGENTS.md`，本身不该作为文件发给开发者。
-const NON_PAYLOAD_DIRS: &[&str] = &["_shared"];
+///
+/// `upgrade/` 是 M6 升级包的素材（见 [`UPGRADE_DIRS`]）：它发给**存量**工程，
+/// 不属于「新生成的工程」——混进新工程 zip 会让两批受众拿到对方用不上的东西。
+const NON_PAYLOAD_DIRS: &[&str] = &["_shared", "upgrade"];
 
 /// 随包下发的 SDK 源码：语言 id → (相对路径, 打进包里的目录名, **SDK 的引用路径**, 排除项)。
 ///
@@ -142,6 +145,27 @@ const SDK_SOURCES: &[(&str, &str, &str, &str, &[&str])] = &[
 ];
 
 const TEMPLATE_SUFFIX: &str = ".tmpl";
+
+/// 每门语言的 M6 升级包素材目录：(语言 id, 目录相对路径)。
+///
+/// 给**存量**插件工程补 M6（互调/发现）示例与升级脚本用（见 docs/scaffold-upgrade-design.md §4）。
+/// 目录约定是各语言的 `templates/upgrade/`——**go 特殊**：它的模板根本来就在
+/// `cmd/hub-plugin/templates/` 下，素材跟着模板走。
+///
+/// 与 `LANGUAGES` 分开成一张表而不是从模板目录推导（比如「去掉末尾的 plugin 再拼
+/// upgrade」）：那类字符串手术在有人调整 `LANGUAGES` 的路径时会静默指错地方，
+/// 而显式表 + 下面的双向核对（缺一门就构建失败）把错留在编译期。
+///
+/// **目录可以缺失**（生成 `None`）：五门素材由各语言负责人并行产出，中台侧机制
+/// 先行合入时允许部分语言还没就位；最终五门必须齐，`lib.rs` 的单测盯着这件事。
+/// 素材是固定三件套：`gateway_example.<ext>.tmpl`、`upgrade.sh.tmpl`、`UPGRADE.md.tmpl`。
+const UPGRADE_DIRS: &[(&str, &str)] = &[
+    ("go", "../../sdk/go/cmd/hub-plugin/templates/upgrade"),
+    ("python", "../../sdk/python/templates/upgrade"),
+    ("node", "../../sdk/node/templates/upgrade"),
+    ("rust", "../../sdk/rust/templates/upgrade"),
+    ("csharp", "../../sdk/csharp/templates/upgrade"),
+];
 
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -262,6 +286,11 @@ fn main() {
     }
     let _ = writeln!(out, "];");
 
+    // M6 升级包素材。与上面的模板清单分开放：它们发给**存量**工程，目录可以缺失
+    // （并行开发期），缺失生成 None 而不是构建失败——失败会把还没产出素材的语言
+    // 全部挡在门外，那不是「这批素材有问题」能兜住的事。
+    write_upgrade_sources(&manifest_dir, &mut out);
+
     // 构建时间戳。**只吐原始秒数，格式化交给库**——build script 里的 #[cfg(test)]
     // 不会被 `cargo test` 执行，把换算放这儿等于写了一个永远不会跑的测试。
     // CI 里可用 SOURCE_DATE_EPOCH 钉住，让同样的输入得到同样的二进制。
@@ -278,6 +307,85 @@ fn main() {
 
     let dest = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("templates_gen.rs");
     std::fs::write(&dest, out).expect("写入生成的模板清单失败");
+}
+
+/// 生成 `UPGRADE_SOURCES`（M6 升级包素材清单）。
+///
+/// 逐语言扫 [`UPGRADE_DIRS`]：目录在 → `Some(&[(输出路径, include_bytes!)])`；
+/// 不在 → `None`（并行开发期的过渡态）。同时把目录表原样吐成
+/// `UPGRADE_SOURCE_DIRS`——`lib.rs` 的测试要「从磁盘再读一遍」比对嵌入内容，
+/// 路径得有一个出处而不是在测试里再抄一份表（`Language::source_dir` 同一条理由）。
+///
+/// 与 `LANGUAGES` 双向核对：表里多了不在册的语言、或在册语言没有素材目录声明，
+/// 都是配置错误，直接构建失败——静默跳过会让某门语言悄悄没有升级包。
+fn write_upgrade_sources(manifest_dir: &Path, out: &mut String) {
+    for (id, _) in UPGRADE_DIRS {
+        if !LANGUAGES.iter().any(|(lang, ..)| lang == id) {
+            panic!("UPGRADE_DIRS 里的 {id} 不在 LANGUAGES 里——多了一张表的孤儿条目");
+        }
+    }
+    for (id, ..) in LANGUAGES {
+        if !UPGRADE_DIRS.iter().any(|(lang, _)| lang == id) {
+            panic!("语言 {id} 声明在 LANGUAGES 里，但 UPGRADE_DIRS 里没有它的素材目录");
+        }
+    }
+
+    let _ = writeln!(
+        out,
+        "\n/// M6 升级包素材：(语言 id, 素材清单)。None = 这门语言的素材还没产出。\n\
+         /// 由 build.rs 的 UPGRADE_DIRS 扫描生成，请勿手改。"
+    );
+    let _ = writeln!(
+        out,
+        "#[allow(clippy::type_complexity)]"
+    );
+    let _ = writeln!(
+        out,
+        "static UPGRADE_SOURCES: &[(&str, Option<&[(&str, &[u8])]>)] = &["
+    );
+
+    for (id, rel) in UPGRADE_DIRS {
+        let dir = manifest_dir.join(rel);
+        // rerun-if-changed 对不存在的目录也发：素材由各语言并行产出，「目录被建出来」
+        // 必须触发重建，否则 None 会一直留到下一次不相干的改动。
+        println!("cargo:rerun-if-changed={}", dir.display());
+
+        if !dir.is_dir() {
+            let _ = writeln!(out, "    ({id:?}, None),");
+            continue;
+        }
+
+        let files = collect(&dir, &dir, &[]);
+        if files.is_empty() {
+            // 目录建了却是空的：多半是占位提交，与「没建」同一待遇，但值得单独点出来
+            panic!("升级素材目录 {} 存在但里面一个文件都没有", dir.display());
+        }
+
+        let _ = writeln!(out, "    ({id:?}, Some(&[");
+        for f in &files {
+            // 输出路径去掉 .tmpl 后缀——与新工程模板同一条「文件名即输出名」约定
+            let output = f.strip_suffix(TEMPLATE_SUFFIX).unwrap_or(f);
+            let _ = writeln!(
+                out,
+                "        ({output:?}, include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), {rel_part:?}))),",
+                rel_part = format!("/{rel}/{f}"),
+            );
+        }
+        let _ = writeln!(out, "    ])),");
+    }
+    let _ = writeln!(out, "];");
+
+    // 目录表给测试用（从磁盘再读一遍比对用），没有运行期读者，允许 dead_code。
+    let _ = writeln!(
+        out,
+        "\n/// 升级素材目录（相对 CARGO_MANIFEST_DIR），只有测试读它，所以允许 dead_code。\n\
+         #[allow(dead_code)]\n\
+         static UPGRADE_SOURCE_DIRS: &[(&str, &str)] = &["
+    );
+    for (id, rel) in UPGRADE_DIRS {
+        let _ = writeln!(out, "    ({id:?}, {rel:?}),");
+    }
+    let _ = writeln!(out, "];");
 }
 
 /// 生成「共通层素材」那一行的表达式。

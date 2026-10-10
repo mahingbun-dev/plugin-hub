@@ -88,7 +88,7 @@ func Test生成完整的插件工程(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"go.mod", "main.go", "plugin.go", "plugin_test.go", "README.md", "Dockerfile", ".gitignore",
+		"go.mod", "main.go", "plugin.go", "gateway_example.go", "plugin_test.go", "README.md", "Dockerfile", ".gitignore",
 	} {
 		if _, err := os.Stat(filepath.Join(target, name)); err != nil {
 			t.Errorf("缺少 %s: %v", name, err)

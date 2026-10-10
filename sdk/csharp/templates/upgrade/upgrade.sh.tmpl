@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# @@name@@ 的 M6（插件互调与发现）升级脚本 —— 幂等，重复执行安全。
+#
+# 做三件事：
+#   1. 把 GatewayExample.cs 复制到项目根（已存在则跳过，不动你的版本）；
+#   2. README.md 没有 m6-intercall marker 时，把「插件互调与发现（M6）」小节
+#      追加到文件末尾（README 不存在则创建一个带 marker 的）；
+#   3. 打印检查清单。
+#
+# 用法：把本脚本与 GatewayExample.cs、UPGRADE.md 一起放到**插件项目根**下执行：
+#   bash upgrade.sh            # 工作区有未提交改动时会要求确认
+#   bash upgrade.sh --force    # 跳过确认
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+force="${1:-}"
+
+# 前置确认：本脚本只**新增**文件与**追加** README、不改既有文件，但升级要可回退，
+# 混着别的未提交改动排查起来会痛苦，所以先问一句
+if [[ "$force" != "--force" ]] && git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [[ -n "$(git -C "$root" status --porcelain)" ]]; then
+        echo "⚠️  $root 有未提交的改动。建议先提交或暂存（本脚本不改既有文件，但出问题好回退）。"
+        printf "继续执行？[y/N] "
+        read -r answer || answer=""
+        case "$answer" in
+        y | Y) ;;
+        *) echo "已取消。"; exit 1 ;;
+        esac
+    fi
+fi
+
+changed=0
+
+# ---- ① 休眠演示：素材与目标**同在项目根**（go/python/csharp 的规范落点就是根，
+# 素材随本脚本一起拷进来的那一刻就已经就位，所以这门没有复制动作，只做确认）。
+# Plugin.csproj 的默认通配（**/*.cs）会把它编进去，排除项（tests/**;sdk/**）碰不到它。
+if [[ ! -f "$root/GatewayExample.cs" ]]; then
+    echo "缺少 GatewayExample.cs —— 请把升级包里的 GatewayExample.cs 与本脚本一起放到项目根再执行。" >&2
+    exit 1
+fi
+echo "SKIP  GatewayExample.cs（已就位；要改就改成自己的版本，重跑本脚本不会覆盖）"
+
+# ---- ② README：marker 是幂等判据，有了就不动 ----
+readme="$root/README.md"
+if [[ ! -f "$readme" ]] || ! grep -q "m6-intercall-start" "$readme"; then
+    if [[ ! -f "$readme" ]]; then
+        # 没有README的存量项目也给出一个能起步的：标题 + M6 小节
+        printf '# @@name@@\n' >"$readme"
+    fi
+    # 末尾没换行时补一个，避免小节标题粘在旧内容的最后一行上。
+    # 用显式 if 而不是 `[[ ]] && ...`：后者在 set -e 下的行为依赖「&& 列表中
+    # 非末命令失败不退出」这条微妙规则，没必要让读者去猜
+    if [[ -n "$(tail -c 1 "$readme")" ]]; then
+        printf '\n' >>"$readme"
+    fi
+    cat >>"$readme" <<'M6_SECTION_EOF'
+
+<!-- m6-intercall-start -->
+## 插件互调与发现（M6）
+
+插件之间不直连：同步互调（`InvokePluginAsync`——拿得到下游的处理结果）与发现三件套
+（`ListPluginsAsync` / `DescribeMessageAsync` / `GetContractAsync`）都经中台的
+PluginGateway 代调；异步发布（`PublishAsync`——投给 flow 就返回、拿不到处理结果）
+走 HubState 那条连接。客户端不用自己构造：实现 `IGatewayAware.SetGateway`，
+宿主在每次注册成功后注入，凭证、401 自愈、重注册全由宿主管。
+
+`GatewayExample.cs` 是一份**休眠演示**（发现 + 同步互调 + 异步发布，编译通过、
+不接线到主流程），要用时把方法挪进 `Plugin.cs` 即可。互调时传当前信封
+（`InvokeOptions.CurrentEnvelope`）= trace 贯通 + 链路防环；互调链
+（meta 的 `hub.call_chain`）由中台维护，**不要自己往里追加自己**。
+
+要调别的插件前先确认中台策略：`HUB_PLUGIN_CALL_POLICY` 为 `declared` 时，manifest
+必须声明 `Invokes` 名单（`Plugin.cs` 的 manifest 里有注释示例），名单外一律拒绝；
+`allow`（缺省）不限制。配额与防环由中台兜底：每插件每分钟 60 次互调、调用链深上限 8。
+
+完整背景见 plugin-hub 仓库的 `docs/plugin-onboarding.md` 与 `examples/ping-chain`。
+<!-- m6-intercall-end -->
+M6_SECTION_EOF
+    echo "ADD  README.md（追加 M6 小节）"
+    changed=1
+else
+    echo "SKIP  README.md（M6 小节已存在）"
+fi
+
+echo
+if [[ "$changed" -eq 0 ]]; then
+    echo "已是最新，无需变更。"
+fi
+echo "检查清单："
+echo "  1. 构建与 L1：dotnet build && dotnet test --project tests/"
+echo "     （GatewayExample.cs 在项目根，会被 Plugin.csproj 默认通配一起编译）"
+echo "  2. 要互调其他插件：在 Plugin.cs 的 manifest 里打开 Invokes 的注释行"
+echo "     （HUB_PLUGIN_CALL_POLICY=declared 时声明才会放行；声明属于契约变更，需升版本号）"
+echo "  3. 配额与防环由中台兜底：每插件每分钟 60 次互调、调用链深上限 8；"
+echo "     互调链（meta 的 hub.call_chain）由中台维护，不要自己往里追加自己"
+echo "  4. 确认无误后，可删除项目根下残留的素材：upgrade.sh、UPGRADE.md"
+echo "     （GatewayExample.cs 已就位为工程文件，保留）"
+echo "详见 UPGRADE.md 与 README.md 的「插件互调与发现（M6）」小节。"

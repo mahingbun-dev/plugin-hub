@@ -589,6 +589,15 @@ def handle(self, ctx, env):
 `*InvokeRejected` / `*InvokeFailed`，Python 翻成同名异常——按 reason 决定改逻辑还是
 退避重试，别无脑重发；基础设施故障（未鉴权、中台不可达）才是 gRPC 错误原样抛。
 
+### 异步发布：`StateClient.Publish`
+
+要「触发后不等结果」的场合（发事件、拉起一条 flow）用发布而不是互调：
+`StateClient.Publish(ctx, target, env)`（Python `state.publish(target, env)`）把信封投给
+目标 flow，中台受理即返回（Go 得受理 id，Python 得 `PublishReceipt`），下游结果拿不到——
+要结果的同步互调走 `InvokePlugin`。信封由你构造：Go 用 `hubkit.NewEnvelope()` 起步
+（自带全新 message_id/trace_id）、`hubkit.WithPayloadJSON` 装载荷；`subject` 中台会
+无条件覆盖为你的插件身份，自报无效。中台未受理时 Go 得 `*PublishRejected`。
+
 ### 权限声明：manifest 的 `invokes`
 
 manifest 新增可选字段 `invokes`（目标插件名列表），声明「本插件要调用谁」：

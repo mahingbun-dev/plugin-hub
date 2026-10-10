@@ -63,10 +63,12 @@ const DEFAULT_LOGIN_TTL: Duration = Duration::from_secs(8 * 60 * 60);
 ///
 /// hub 与插件之间的约定：dc-dict 这类需要下游登录态的插件从这里取
 /// masToken 去调 UAT 的 DC 接口（hub 透传登录态，插件不持任何凭证）。
-/// 改名等于断契约，必须与全部消费插件同步改。它的允许活动范围只有
-/// 内存缓存与发往插件的那份信封——审计 / 日志 / 死信一律不得出现
+/// 改名等于断契约，必须与全部消费插件同步改——所以**定义收口到 hub-core**
+/// （[`hub_core::MAS_TOKEN_META`]）：HTTP 面与 MCP 面各写一份迟早漂移，
+/// 嵌入场景两条路透传的必须是同一个键。它的允许活动范围只有
+/// 内存缓存与发往插件的那份信封 meta——审计 / 日志 / 死信一律不得出现
 /// （见 `redact_mas_token` 的边界兜底）。
-const HUB_MAS_TOKEN_META: &str = "hub.mas_token";
+use hub_core::MAS_TOKEN_META as HUB_MAS_TOKEN_META;
 
 /// MCP 服务端。
 #[derive(Clone)]
@@ -747,7 +749,11 @@ impl HubMcp {
         };
         // 调用层故障（插件不可达 / 超时 / gRPC 错误）转成**结构化卡**而不是
         // JSON-RPC error：agent 拿到的是与业务结果同构、可读可对账的信息。
-        let value = match self.invoke_plugin_value(subject, None, args).await {
+        // 请求自带的 Bearer token 随调透传（优先级见 invoke_plugin_value）。
+        let value = match self
+            .invoke_plugin_value(subject, None, args, bearer_token_of(&ctx))
+            .await
+        {
             Ok(value) => value,
             Err(err) => invocation_error_card(&err.to_string()),
         };
@@ -770,17 +776,25 @@ impl HubMcp {
         tool: Option<&str>,
         args: InvokePluginArgs,
     ) -> Result<CallToolResult, ErrorData> {
-        let value = self.invoke_plugin_value(subject, tool, args).await?;
+        // 直调入口（测试与编程用）没有请求上下文，不带请求凭证——
+        // meta 注入回落 login 缓存（见 invoke_plugin_value 的优先级说明）
+        let value = self.invoke_plugin_value(subject, tool, args, None).await?;
         Ok(json_result(&value))
     }
 
     /// [`Self::invoke_plugin_as`] 的**载荷版**：返回还没渲染成 MCP 结果的
     /// 载荷 JSON，调用方（工具入口）可以先做人工确认闸门再渲染。
+    ///
+    /// `bearer_token` 是**本次请求自带**并经鉴权中间件验过的 Bearer token。
+    /// 透传优先级是「请求凭证 > login 缓存」：嵌入场景多用户共用 hub 进程，
+    /// login 缓存是进程级单槽（后登录顶掉先登录），请求凭证才是「这次调用
+    /// 是谁」的答案；缓存只对没带凭证的请求兜底（独立使用、非嵌入的形态）。
     async fn invoke_plugin_value(
         &self,
         subject: Option<Subject>,
         tool: Option<&str>,
         args: InvokePluginArgs,
+        bearer_token: Option<String>,
     ) -> Result<serde_json::Value, ErrorData> {
         let timeout_ms = args.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
         if timeout_ms <= 0 {
@@ -813,12 +827,13 @@ impl HubMcp {
         }
 
         // 登录态透传（契约键见 HUB_MAS_TOKEN_META）：hub 自己不持凭证，只把
-        // login 换来的 masToken 随信封带给 dc-dict 这类需要下游登录态的插件。
-        // 缓存无登录态（闸门关 / 未登录）时不注入——插件以「缺键」识别匿名调用，
-        // 空壳键只会让插件把「没有」误判成「有但为空」。login 工具自身经本函数
-        // 调 auth 插件时同理：换登录期间缓存若仍有效，带上的是旧 token，而
-        // auth 插件只读载荷不读 meta，不受影响。
-        if let Some(mas_token) = self.login_cache.valid_mas_token() {
+        // 验过的登录态随信封带给 dc-dict 这类需要下游登录态的插件。
+        // **请求自带的 Bearer token 优先**（鉴权中间件验过、随请求扩展进来的），
+        // 其次 login 换来的缓存；两者都没有时不注入——插件以「缺键」识别匿名
+        // 调用，空壳键只会让插件把「没有」误判成「有但为空」。login 工具自身
+        // 经本函数调 auth 插件时同理：换登录期间缓存若仍有效，带上的是旧
+        // token，而 auth 插件只读载荷不读 meta，不受影响。
+        if let Some(mas_token) = bearer_token.or_else(|| self.login_cache.valid_mas_token()) {
             envelope
                 .meta
                 .insert(HUB_MAS_TOKEN_META.to_string(), mas_token);
@@ -1114,6 +1129,13 @@ impl HubMcp {
         if plugin == self.login_plugin {
             return Ok(LoginOutcome::Disabled);
         }
+        // **请求自带的凭证最优先**（中间件验过的 Cookie/Bearer，见 subject_of）：
+        // 嵌入场景多用户共用 hub 进程，login 缓存是进程级单槽（后登录整体顶掉
+        // 先登录），缓存优先的话 B 用户会被 A 的缓存身份顶替——那是身份错乱
+        // （安全问题），不是体验取舍。缓存只对「没带凭证的请求」兜底。
+        if let Some(subject) = subject_of(ctx) {
+            return Ok(LoginOutcome::Authenticated(subject));
+        }
         if let Some(subject) = self.login_cache.valid_subject() {
             return Ok(LoginOutcome::Authenticated(subject));
         }
@@ -1224,6 +1246,9 @@ impl HubMcp {
                     message_id: None,
                     timeout_ms: None,
                 },
+                // 登录链路不带请求凭证：meta 注入回落 login 缓存（换登录期间
+                // 缓存若仍有效，auth 插件只读载荷不读 meta，不受影响）
+                None,
             )
             .await?;
         let payload = value.get("payload").cloned().unwrap_or_default();
@@ -1630,6 +1655,9 @@ impl ServerHandler for HubMcp {
                         message_id: None,
                         timeout_ms: None,
                     },
+                    // 聚合工具与 invoke_plugin 同一优先级：请求自带的凭证
+                    // 随调透传，缓存只兜底（见 invoke_plugin_value）
+                    bearer_token_of(&context),
                 )
                 .await
             {
@@ -1988,6 +2016,17 @@ fn subject_of(ctx: &RequestContext<RoleServer>) -> Option<Subject> {
         scopes: subject.scopes.clone(),
         ..Default::default()
     })
+}
+
+/// 从请求上下文取**请求自带**的 Bearer token（鉴权中间件验过、挂在请求扩展里）。
+///
+/// 与 [`subject_of`] 同源同前提：中间件没挂在 `/mcp` 上时这里是 None——
+/// 此时透传回落 login 缓存（见 `invoke_plugin_value` 的优先级说明）。
+/// 只服务于信封 meta 透传（`HUB_MAS_TOKEN_META`），不进日志、不进响应体。
+fn bearer_token_of(ctx: &RequestContext<RoleServer>) -> Option<String> {
+    let parts = ctx.extensions.get::<Parts>()?;
+    let subject = parts.extensions.get::<Arc<AuthenticatedSubject>>()?;
+    subject.bearer_token.clone()
 }
 
 /// agent 未提供 message_id 时生成一个。
